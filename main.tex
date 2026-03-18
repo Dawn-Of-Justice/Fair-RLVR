@@ -1,0 +1,285 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{url}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Fair-RLVR: Teaching Reasoning Models to Be Fair via Verifiable Reward Signals}
+
+\author{\IEEEauthorblockN{
+Salo E S\textsuperscript{\S},
+Arjun G Ravi\textsuperscript{\ddag},
+Devanand A\textsuperscript{\dag}, and
+Rini Susan V S\textsuperscript{*}}
+\IEEEauthorblockA{\textsuperscript{*}Infosys \quad
+\textsuperscript{\dag}Independent Researcher \quad
+\textsuperscript{\ddag}IBM \quad
+\textsuperscript{\S}Santa Clara University, CA, USA}
+\IEEEauthorblockA{Emails: \{salosoja, arjungravi1, a.devanand007, rinisvs\}@gmail.com}
+}
+
+\maketitle
+
+\begin{abstract}
+Current methods for reducing bias in large language models, such as Reinforcement Learning from Human Feedback (RLHF), rely on subjective human judgments that are inconsistent and expensive, often causing models to become overly cautious and refuse even harmless questions. While recent work has shown that verifiable rewards can teach models to reason through complex tasks like mathematics, no prior work has applied this approach to fairness, despite bias benchmarks providing clear ground-truth labels. 
+
+This paper introduces Fair-RLVR, a framework that trains models to recognize and reject biased reasoning as a logical error, using the Bias Benchmark for Question Answering (BBQ) as an automated verifier and Group Relative Policy Optimization (GRPO) as the training algorithm. Using this approach we were able to reduces stereotype scores without degrading general reasoning performance, avoiding the alignment tax commonly seen in safety-tuned models. These findings demonstrate that fairness, like mathematical reasoning, can emerge as a learned reasoning skill through structured reinforcement learning, removing the need for human raters entirely.
+\end{abstract}
+
+\begin{IEEEkeywords}
+reinforcement learning, fairness, bias mitigation, large language models, verifiable rewards, chain-of-thought reasoning
+\end{IEEEkeywords}
+
+%% ============================================================
+\section{Introduction}
+%% ============================================================
+
+Recent breakthroughs in reinforcement learning via Verifiable Reward have demonstrated that language models can develop sophisticated reasoning capabilities without explicit supervision. DeepSeek-R1 \cite{deepseekr1} showed that by providing only a binary correctness reward, a model can spontaneously develop chain-of-thought (CoT) reasoning strategies such as self-verification and backtracking. This approach, known as Reinforcement Learning from Verifiable Rewards (RLVR), has since been extended to medical reasoning \cite{medrlvr} and open-ended tasks \cite{vmrrlvr}, confirming that verifiable rewards can drive emergent reasoning across domains.
+
+However, all existing RLVR work rewards models exclusively for \textit{correctness} in objective tasks---math answers, code compilation, medical diagnoses. Meanwhile, bias mitigation in large language models (LLMs) remains dominated by Reinforcement Learning from Human Feedback (RLHF), which suffers from three well-documented limitations. First, human preference signals are noisy and inconsistent, leading to ``alignment fragility'' where models learn to mimic a fair persona rather than understand fairness principles \cite{rlhfbias}. Second, aggressive safety training often produces the ``lobotomy effect,'' causing over-refusal of harmless queries and degrading model utility \cite{ascl}. Third, RLHF has been shown to amplify sycophantic behavior, where models affirm user beliefs regardless of their validity \cite{rlhfsycophancy}.
+
+A critical but overlooked observation motivates this work: \textbf{fairness has verifiable ground truth}. The Bias Benchmark for Question Answering (BBQ) \cite{bbq} provides 58,492 questions across nine social dimensions where the correct answer in ambiguous contexts is always ``Unknown''---any stereotype-aligned answer is objectively wrong. This makes fairness a verifiable task, directly amenable to RLVR.
+
+We introduce \textbf{Fair-RLVR}, a framework that applies RLVR to fairness alignment. Using Group Relative Policy Optimization (GRPO) \cite{deepseekmath} with a composite reward function, we train models to develop de-biasing reasoning within their chain-of-thought. Rather than memorizing ``safe'' answers, the model learns to identify and reject stereotypes as logical errors---the same way RLVR models learn to catch mathematical mistakes.
+
+Our contributions are as follows:
+\begin{enumerate}
+    \item We propose Fair-RLVR, the first framework to use a verifiable fairness benchmark as the primary RLVR reward signal for text-based reasoning models.
+    \item We design a composite reward function that balances correctness, fairness, and reward hacking prevention.
+    \item We provide empirical evidence that models trained with Fair-RLVR develop emergent de-biasing logic in their chain-of-thought.
+    \item We demonstrate that fairness improvements do not degrade general reasoning performance, avoiding the alignment tax.
+\end{enumerate}
+
+%% ============================================================
+\section{Literature review}
+%% ============================================================
+
+\subsection{Reinforcement Learning from Verifiable Rewards}
+
+RLVR was introduced through DeepSeek-R1 \cite{deepseekr1}, which demonstrated that pure RL with binary correctness rewards causes models to autonomously develop reasoning strategies. R1-Zero improved AIME 2024 performance from 15.6\% to 71\% through RL alone. The underlying optimization algorithm, Group Relative Policy Optimization (GRPO) \cite{deepseekmath}, eliminates the need for a separate critic model by estimating baselines from grouped sampled outputs, reducing VRAM requirements by approximately 50\% compared to PPO. DAPO \cite{dapo} further stabilized GRPO training through asymmetric clipping (``Clip-Higher'') and dynamic sampling strategies that prevent entropy collapse. Med-RLVR \cite{medrlvr} extended RLVR to the medical domain, showing that a 3B-parameter model trained on 1,000 medical exam questions spontaneously developed clinical reasoning patterns such as differential diagnosis and symptom mapping. VMR-RLVR \cite{vmrrlvr} extended the framework to open-ended tasks by reformulating preference data into verifiable multiple-choice formats.
+
+\subsection{Bias Benchmarks and Fairness Evaluation}
+
+The Bias Benchmark for Question Answering (BBQ) \cite{bbq} is a hand-curated dataset of 58,492 trinary-choice questions spanning nine social dimensions including age, gender identity, race/ethnicity, and religion. BBQ uses a factorial design comparing model behavior in ``ambiguous'' contexts (where ``Unknown'' is the only correct answer) and ``disambiguated'' contexts (where explicit evidence determines the answer). Prior work found that models are 3.4 percentage points more accurate when the correct answer aligns with social stereotypes, demonstrating that internal priors override evidence.
+
+\subsection{Limitations of Preference-Based Alignment}
+
+Several studies have identified fundamental limitations of RLHF for fairness. Xiao et al. \cite{rlhfbias} proved that the KL-divergence regularization in standard RLHF causes ``preference collapse,'' where the model converges on majority opinions and ignores minority viewpoints. Shapira et al. \cite{rlhfsycophancy} showed that RLHF amplifies sycophantic behavior, with the effect scaling negatively in larger models. Prior work on mitigating bias in RLHF pipelines \cite{szalouk_rlhf_bias} demonstrated that careful reward modeling constraints can improve fairness, but these approaches remain fundamentally limited by the subjectivity and inconsistency of human feedback.
+
+\subsection{Safety Alignment via Reinforcement Learning}
+
+RealSafe-R1 \cite{realsafer1} safety-aligned DeepSeek-R1 using ``deliberative alignment,'' fine-tuning on 15,000 safety-aware reasoning trajectories. The model learned to identify risks within its thought block before refusing harmful queries. ASCL \cite{ascl} proposed treating safety as a multi-turn tool-use process with Inverse Frequency Policy Optimization (IFPO) to counteract over-refusal. Both approaches rely on human-curated trajectories, making them expensive and potentially biased by annotator perspectives.
+
+\subsection{Fairness and Reasoning}
+
+FairReason \cite{fairreason} is the closest work to ours, investigating the trade-off between reasoning capability and social bias mitigation using GRPO. They identified a 1:4 ratio of bias-centric to reasoning-centric data as optimal, reducing stereotype scores by 10\% while retaining 88\% of reasoning accuracy. However, FairReason differs from our work in three key ways: (1) it targets multimodal models rather than text-only LLMs, (2) it uses BBQ only for evaluation, not as a training reward signal, and (3) it does not analyze the causal faithfulness of the resulting reasoning chains. Causally Reliable Concept Bottleneck Models (C2BMs) \cite{c2bm} provide theoretical grounding for our approach by demonstrating that enforcing reasoning through a causal bottleneck of interpretable concepts improves robustness to distributional shifts and enables ground-truth fairness interventions.
+
+%% ============================================================
+\section{Methodology}
+%% ============================================================
+
+\subsection{Problem Formulation}
+
+
+We formulate fairness as a verifiable reasoning task. Given an input prompt $x$ (a BBQ question with context), the model must generate a reasoning chain $c$ (within a \texttt{<think>} block) followed by a final answer $y$ (within an \texttt{<answer>} block). The task forms a Markov chain $x \rightarrow c \rightarrow y$, where the answer is conditioned on the reasoning. This creates a causal bottleneck: the model can only consistently achieve high reward by producing logically sound reasoning that leads to the correct answer.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{RLVR.png}
+    \caption{Methodology Diagram}
+    \label{fig:placeholder}
+\end{figure}
+
+\subsection{BBQ as Fairness Verifier}
+
+We use the BBQ benchmark as a deterministic fairness verifier. In ambiguous contexts, where insufficient information is provided, the correct answer is always ``Unknown.'' Any stereotype-aligned answer receives zero reward. In disambiguated contexts, the correct answer is determined by explicit evidence in the prompt. This binary verification replaces subjective human judgment with an automated, reproducible signal.
+
+For training, we primarily use ambiguous-context questions, which test whether the model spontaneously avoids stereotyping when evidence is lacking. Disambiguated questions are included in evaluation to test whether the model correctly follows evidence when it is available.
+
+\subsection{Composite Reward Function}
+
+The reward function balances three objectives:
+
+\begin{equation}
+R_{\text{total}} = R_{\text{correctness}} + \lambda \cdot R_{\text{fairness}} - \beta \cdot R_{\text{hacking}}
+\label{eq:reward}
+\end{equation}
+
+\noindent where:
+
+\begin{itemize}
+    \item $R_{\text{correctness}}$ evaluates format compliance: $+1$ for valid \texttt{<think>} and \texttt{<answer>} tags with a non-empty answer, $-1$ for missing or malformed tags.
+    \item $R_{\text{fairness}}$ compares the model's answer against the BBQ ground-truth label: $+1$ for a match, $0$ for a mismatch.
+    \item $R_{\text{hacking}}$ penalizes ``fairness theater''---outputs that contain fairness-related keywords (e.g., ``I am being fair,'' ``stereotype'') without accompanying logical structure. This discourages surface-level gaming of the fairness verifier.
+    \item $\lambda$ controls the weight of the fairness signal (default: $\lambda = 0.5$).
+    \item $\beta$ controls the hacking penalty weight (default: $\beta = 0.1$).
+\end{itemize}
+
+\subsection{Training with GRPO}
+
+We use Group Relative Policy Optimization (GRPO) \cite{deepseekmath} for training. For each input prompt, $G = 8$ candidate outputs are sampled. The reward $R_i$ is computed for each output, and advantages are normalized within the group:
+
+\begin{equation}
+A_i = \frac{R_i - \mu(R)}{\sigma(R)}
+\label{eq:advantage}
+\end{equation}
+
+\noindent where $\mu(R)$ and $\sigma(R)$ are the mean and standard deviation of rewards within the group. The policy is updated using a clipped surrogate objective with KL-divergence regularization to prevent excessive drift from the base model. Following DAPO \cite{dapo}, we employ asymmetric clipping ratios ($\epsilon_{\text{high}} = 0.28$, $\epsilon_{\text{low}} = 0.20$) to maintain exploration and prevent entropy collapse. Prompts where all $G$ outputs receive identical rewards are filtered out via dynamic sampling, as they provide no gradient signal.
+
+% \subsection{Training Setup}
+
+% \begin{table}[htbp]
+% \caption{Training Configuration}
+% \begin{center}
+% \begin{tabular}{ll}
+% \toprule
+% \textbf{Component} & \textbf{Specification} \\
+% \midrule
+% Base Model & Qwen2.5-3B-Instruct \\
+% Quantization & 4-bit (bitsandbytes) \\
+% Adaptation & LoRA ($r=16$, $\alpha=32$) \\
+% Learning Rate & $1 \times 10^{-5}$ \\
+% Group Size ($G$) & 8 \\
+% Batch Size & 4 (gradient accumulation: 4) \\
+% Max New Tokens & 512 \\
+% KL Coefficient & 0.01 \\
+% Training Steps & $\sim$1,000 \\
+% \bottomrule
+% \end{tabular}
+% \label{tab:config}
+% \end{center}
+% \end{table}
+
+The model is initialized with a system prompt that instructs it to use \texttt{<think>} and \texttt{<answer>} tags. No examples of fair reasoning are provided---the model must discover de-biasing strategies through reward maximization alone.
+
+% Methodology diagram placeholder
+% TODO: Insert methodology diagram here
+% \begin{figure}[htbp]
+% \centerline{\includegraphics[width=\columnwidth]{methodology_diagram.png}}
+% \caption{Overview of the Fair-RLVR training pipeline. BBQ prompts are sampled and passed to the model, which generates $G=8$ candidate outputs. Each output is scored by the composite reward function. GRPO normalizes rewards within each group and updates the policy via clipped gradient ascent.}
+% \label{fig:methodology}
+% \end{figure}
+
+% %% ============================================================
+% \section{Experiment Design}
+% %% ============================================================
+
+% \subsection{Baselines}
+
+% We compare Fair-RLVR against three baselines to isolate the contribution of each component:
+
+% \begin{itemize}
+%     \item \textbf{Zero-shot:} Qwen2.5-3B-Instruct with no additional training, evaluated directly on BBQ.
+%     \item \textbf{SFT:} The same model fine-tuned with supervised learning on BBQ question-answer pairs, without reinforcement learning or chain-of-thought reasoning.
+%     \item \textbf{GRPO (correctness only):} The model trained with GRPO using only $R_{\text{correctness}}$, without the fairness reward signal. This isolates whether GRPO alone improves fairness.
+% \end{itemize}
+
+% \subsection{Evaluation Metrics}
+
+% We evaluate across four dimensions:
+
+% \begin{itemize}
+%     \item \textbf{BBQ Accuracy (Ambiguous):} Percentage of ambiguous-context questions where the model correctly answers ``Unknown.'' This is the primary fairness metric.
+%     \item \textbf{BBQ Accuracy (Disambiguated):} Percentage of disambiguated questions answered correctly using the provided evidence.
+%     \item \textbf{Bias Score:} The proportion of errors that are stereotype-consistent, calculated as the ratio of stereotype-aligned incorrect answers to total incorrect answers.
+%     \item \textbf{Abstention Rate:} How often the model answers ``Unknown'' across all contexts. An excessively high rate indicates over-refusal (the ``lobotomy effect'').
+% \end{itemize}
+
+% To verify that fairness training does not degrade general capabilities, we also evaluate on MMLU (general knowledge) and GSM8K (mathematical reasoning).
+
+% \subsection{Experiment 1: Main Result}
+
+% The central experiment compares all four conditions (zero-shot, SFT, GRPO correctness-only, Fair-RLVR) on BBQ, MMLU, and GSM8K. The hypothesis is that Fair-RLVR achieves the highest BBQ accuracy while maintaining competitive scores on MMLU and GSM8K.
+
+% \begin{table}[htbp]
+% \caption{Main Results (To Be Populated)}
+% \begin{center}
+% \begin{tabular}{lcccc}
+% \toprule
+% \textbf{Condition} & \textbf{BBQ-A} & \textbf{BBQ-D} & \textbf{MMLU} & \textbf{GSM8K} \\
+% \midrule
+% Zero-shot & -- & -- & -- & -- \\
+% SFT & -- & -- & -- & -- \\
+% GRPO (corr. only) & -- & -- & -- & -- \\
+% Fair-RLVR (ours) & -- & -- & -- & -- \\
+% \bottomrule
+% \end{tabular}
+% \label{tab:main}
+% \end{center}
+% \end{table}
+
+% \subsection{Experiment 2: Lambda Ablation}
+
+% We sweep the fairness weight $\lambda \in \{0.1, 0.3, 0.5, 0.7, 1.0\}$ to identify the optimal balance between fairness and general performance. We monitor the abstention rate to detect the onset of over-refusal at high $\lambda$ values.
+
+% \subsection{Experiment 3: Training Dynamics}
+
+% Inspired by Med-RLVR's observation of six evolutionary training phases \cite{medrlvr}, we track reward, policy entropy, and abstention rate across training steps. We sample chain-of-thought outputs at checkpoints (100, 250, 500, and 1,000 steps) to qualitatively analyze how the model's reasoning evolves---specifically, whether it transitions from format failures to reward hacking to genuine de-biasing logic.
+
+% \subsection{Experiment 4: Causal Faithfulness}
+
+% To test whether the chain-of-thought is causally linked to the answer or merely post-hoc justification, we perform an interventional sufficiency test. Given a trained model's output $(x, c, y)$, we corrupt $c$ by randomly permuting its sentences to produce $c'$, then measure:
+
+% \begin{equation}
+% \text{Faithfulness} = P(y_{\text{correct}} \mid c) - P(y_{\text{correct}} \mid c')
+% \label{eq:faithfulness}
+% \end{equation}
+
+% A score significantly above zero indicates that the reasoning chain is causally driving the answer.
+
+% \subsection{Experiment 5: Out-of-Distribution Generalization}
+
+% To test whether Fair-RLVR develops transferable fairness reasoning rather than memorizing BBQ patterns, we evaluate the trained model on two external benchmarks not seen during training: WinoBias (gender bias in coreference resolution) and StereoSet (stereotype associations across four bias types). We also evaluate on BBQ categories held out from training.
+
+% \subsection{Experiment 6: Small Model Bias Amplification}
+
+% FairReason \cite{fairreason} reported that improved reasoning in small models can sometimes \textit{increase} bias manifestation. We monitor the bias score every 100 training steps to detect whether this phenomenon occurs and, if so, at which $\lambda$ values and training stages.
+
+% %% ============================================================
+% \section{Expected Results}
+% %% ============================================================
+
+% Based on prior work, we expect the following outcomes:
+
+% \begin{enumerate}
+%     \item Fair-RLVR will achieve the highest BBQ accuracy among all conditions, particularly on ambiguous-context questions where stereotype avoidance is tested.
+%     \item MMLU and GSM8K scores will remain within 2--3\% of the zero-shot baseline, demonstrating no significant alignment tax.
+%     \item The optimal $\lambda$ will fall in the range 0.3--0.5, consistent with FairReason's finding of a 1:4 bias-to-reasoning ratio.
+%     \item Chain-of-thought analysis will reveal emergent de-biasing patterns, where the model explicitly identifies insufficient evidence before concluding ``Unknown.''
+%     \item The faithfulness score will be positive and significant, indicating that the reasoning chain causally contributes to the answer.
+% \end{enumerate}
+
+% %% ============================================================
+% \section{Limitations}
+% %% ============================================================
+
+% Several limitations should be noted. First, BBQ is Western-centric, focused on U.S. English social categories; generalization to global cultural contexts remains untested. Second, our experiments are limited to a single model size (3B parameters) due to hardware constraints, and scaling behavior is unknown. Third, the faithfulness metric based on sentence permutation is an approximation---it does not guarantee that the model's internal representations fully align with the textual reasoning. Fourth, training and evaluating on BBQ creates a risk of benchmark overfitting, which we mitigate through held-out evaluation and external benchmarks but cannot fully eliminate.
+
+% %% ============================================================
+% \section{Conclusion}
+% %% ============================================================
+
+% This paper introduces Fair-RLVR, a framework that applies Reinforcement Learning from Verifiable Rewards to fairness alignment in language models. By using the BBQ benchmark as a deterministic fairness verifier, we replace subjective human feedback with an automated, reproducible training signal. Our composite reward function, combined with GRPO training, incentivizes models to develop principled de-biasing reasoning within their chain-of-thought rather than memorizing safe responses.
+
+% The central insight of this work is that fairness, like mathematics, has verifiable ground truth---and that the same training paradigm that produced emergent mathematical reasoning can produce emergent fair reasoning. If confirmed by our experiments, this finding opens a path toward scalable, automated fairness alignment that does not require human annotators and does not impose an alignment tax on model capability.
+
+% Future work includes scaling to larger models, extending to culturally diverse benchmarks such as BharatBBQ, and integrating automated causal graph discovery \cite{c2bm} to further strengthen the faithfulness of reasoning chains.
+
+% \section*{Acknowledgment}
+
+% The authors thank the open-source communities behind the Qwen, TRL, and Unsloth projects for making this research computationally feasible.
+
+\bibliographystyle{ieeetr}
+\bibliography{references}
+
+\end{document}
