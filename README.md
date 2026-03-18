@@ -29,18 +29,6 @@ R_total = R_correctness + λ · R_fairness - β · R_hacking_penalty
 | Fake fairness | Model says what sounds safe | Model must reason correctly to get reward |
 | Scalability | Expensive human annotation | Fully automated verifier |
 
-## Training Setup
-
-| Component | Specification |
-|---|---|
-| Base Model | Qwen2.5-3B-Instruct |
-| Quantization | 4-bit (bitsandbytes) |
-| Adaptation | LoRA (r=16, α=32) |
-| Hardware | 1× NVIDIA T4 (16 GB) |
-| Algorithm | GRPO (with DAPO fixes) |
-| Dataset | BBQ (~1,000 training samples) |
-| Training Steps | ~1,000 |
-
 ## Project Structure
 
 ```
@@ -91,19 +79,6 @@ python src/train.py --lambda_fair 0.5 --beta_hack 0.1
 
 # Evaluate
 python src/evaluate.py --checkpoint outputs/checkpoint-1000
-```
-
-## Paper
-
-**Accepted at IEEE 2026**
-
-```bibtex
-@inproceedings{fairrlvr2026,
-  title={Fair-RLVR: Teaching Reasoning Models to Be Fair via Verifiable Reward Signals},
-  author={Salo, E S and Ravi, Arjun G and Devanand, A and Rini Susan, V S},
-  booktitle={IEEE Conference},
-  year={2026}
-}
 ```
 
 ## References
