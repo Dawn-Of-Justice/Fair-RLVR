@@ -1,7 +1,5 @@
 # Fair-RLVR: Teaching Reasoning Models to Be Fair via Verifiable Reward Signals
 
-> Can a model learn to reason fairly the same way it learned to reason correctly?
-
 ## What is Fair-RLVR?
 
 Fair-RLVR applies Reinforcement Learning from Verifiable Rewards (RLVR) — the same technique behind DeepSeek-R1's emergent reasoning — to **fairness alignment**. Instead of relying on inconsistent human feedback (RLHF), we use the [BBQ benchmark](https://github.com/nyu-mll/BBQ) as an automated fairness verifier with ground-truth labels.
