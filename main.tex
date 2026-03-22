@@ -55,7 +55,7 @@ We introduce \textbf{Fair-RLVR}, a framework that applies RLVR to fairness align
 Our contributions are as follows:
 \begin{enumerate}
     \item We propose Fair-RLVR, the first framework to use a verifiable fairness benchmark as the primary RLVR reward signal for text-based reasoning models.
-    \item We design a composite reward function that balances correctness, fairness, and reward hacking prevention.
+    \item We design a composite reward function that balances correctness and fairness, with automated structural and semantic penalties to prevent reward hacking without manual keyword curation.
     \item We provide empirical evidence that models trained with Fair-RLVR develop emergent de-biasing logic in their chain-of-thought.
     \item We demonstrate that fairness improvements do not degrade general reasoning performance, avoiding the alignment tax.
 \end{enumerate}
@@ -108,10 +108,10 @@ For training, we primarily use ambiguous-context questions, which test whether t
 
 \subsection{Composite Reward Function}
 
-The reward function balances three objectives:
+The reward function combines a correctness signal, a fairness signal, and two automated anti-hacking penalties:
 
 \begin{equation}
-R_{\text{total}} = R_{\text{correctness}} + \lambda \cdot R_{\text{fairness}} - \beta \cdot R_{\text{hacking}}
+R_{\text{total}} = R_{\text{correctness}} + \lambda \cdot R_{\text{fairness}} - P_{\text{structural}} - P_{\text{leak}}
 \label{eq:reward}
 \end{equation}
 
@@ -120,10 +120,17 @@ R_{\text{total}} = R_{\text{correctness}} + \lambda \cdot R_{\text{fairness}} - 
 \begin{itemize}
     \item $R_{\text{correctness}}$ evaluates format compliance: $+1$ for valid \texttt{<think>} and \texttt{<answer>} tags with a non-empty answer, $-1$ for missing or malformed tags.
     \item $R_{\text{fairness}}$ compares the model's answer against the BBQ ground-truth label: $+1$ for a match, $0$ for a mismatch.
-    \item $R_{\text{hacking}}$ penalizes ``fairness theater''---outputs that contain fairness-related keywords (e.g., ``I am being fair,'' ``stereotype'') without accompanying logical structure. This discourages surface-level gaming of the fairness verifier.
     \item $\lambda$ controls the weight of the fairness signal (default: $\lambda = 0.5$).
-    \item $\beta$ controls the hacking penalty weight (default: $\beta = 0.1$).
 \end{itemize}
+
+To prevent reward hacking without relying on manually curated keyword lists, we adopt two automated penalties inspired by recent work on composite verifiable rewards \cite{tarek2025composite}:
+
+\begin{itemize}
+    \item $P_{\text{structural}}$ is a rule-based penalty that detects three structural violations: (1) the answer appearing inside the \texttt{<think>} block (answer leaking), (2) an empty or trivially short reasoning chain ($< 20$ tokens), and (3) reasoning content appearing outside the designated tags. Each violation incurs a fixed penalty of $0.3$.
+    \item $P_{\text{leak}}$ uses Sentence-BERT embeddings to measure the cosine similarity between the \texttt{<think>} and \texttt{<answer>} blocks. If the similarity exceeds a threshold $\tau$ (default: $\tau = 0.85$), a penalty proportional to the excess similarity is applied: $P_{\text{leak}} = \max(0,\; \text{sim}(e_{\text{think}}, e_{\text{answer}}) - \tau)$. This detects cases where the model restates its answer as ``reasoning'' without performing genuine logical analysis.
+\end{itemize}
+
+Unlike keyword-based hacking penalties, both $P_{\text{structural}}$ and $P_{\text{leak}}$ are fully automated, reproducible, and do not penalize legitimate fairness-related reasoning language.
 
 \subsection{Training with GRPO}
 
