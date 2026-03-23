@@ -1,0 +1,29 @@
+# Baseline 3: GRPO with correctness-only reward (no fairness signal)
+# Usage: python -m src.train --config configs/grpo_correctness_only.yaml
+
+model_name: "Qwen/Qwen2.5-3B-Instruct"
+
+# Data
+n_train: 1000
+n_eval: 500
+
+# Reward — lambda=0 disables fairness reward
+lambda_fair: 0.0
+tau: 0.85
+
+# Training
+learning_rate: 1.0e-5
+num_train_steps: 1000
+group_size: 8
+batch_size: 4
+gradient_accumulation: 4
+kl_coeff: 0.01
+
+# LoRA
+lora_r: 16
+lora_alpha: 32
+
+# Output
+output_dir: "results/grpo_correctness_only"
+save_steps: 250
+seed: 42

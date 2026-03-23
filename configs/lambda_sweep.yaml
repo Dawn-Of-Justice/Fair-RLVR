@@ -1,0 +1,34 @@
+# Experiment 2: Lambda ablation sweep
+# Run separately for each lambda value:
+#   python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.1 --output-dir results/lambda_0.1
+#   python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.3 --output-dir results/lambda_0.3
+#   python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.5 --output-dir results/lambda_0.5
+#   python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.7 --output-dir results/lambda_0.7
+#   python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 1.0 --output-dir results/lambda_1.0
+
+model_name: "Qwen/Qwen2.5-3B-Instruct"
+
+# Data
+n_train: 1000
+n_eval: 500
+
+# Reward — lambda overridden via CLI
+lambda_fair: 0.5
+tau: 0.85
+
+# Training
+learning_rate: 1.0e-5
+num_train_steps: 1000
+group_size: 8
+batch_size: 4
+gradient_accumulation: 4
+kl_coeff: 0.01
+
+# LoRA
+lora_r: 16
+lora_alpha: 32
+
+# Output — overridden via CLI
+output_dir: "results/lambda_sweep"
+save_steps: 250
+seed: 42

@@ -13,9 +13,9 @@
 ## Phase 2: Training Code (Local, no GPU needed to write)
 | Step | Task | Status |
 |---|---|---|
-| 2.1 | `src/train.py` — GRPO training loop with TRL's GRPOTrainer | ⬜ |
-| 2.2 | `configs/` — YAML configs for each experiment (lambda values, baselines) | ⬜ |
-| 2.3 | `src/callbacks.py` — Logging: reward per step, entropy, abstention rate, CoT samples at checkpoints | ⬜ |
+| 2.1 | `src/train.py` — GRPO training loop with TRL's GRPOTrainer | ✅ Done |
+| 2.2 | `configs/` — YAML configs for each experiment (lambda values, baselines) | ✅ Done |
+| 2.3 | `src/callbacks.py` — Logging: reward per step, entropy, abstention rate, CoT samples at checkpoints | ✅ Done |
 | 2.4 | Dry run with 5 samples to verify the pipeline doesn't crash | ⬜ |
 
 ## Phase 3: Move to Lightning.ai (GPU needed)
