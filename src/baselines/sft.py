@@ -1,0 +1,250 @@
+"""
+SFT Baseline for Fair-RLVR
+
+Fine-tunes Qwen2.5-3B-Instruct on BBQ question-answer pairs using
+supervised learning. No RL, no chain-of-thought reasoning.
+This is Baseline 2 in Experiment 1.
+
+The model learns to map BBQ prompts → correct answer labels directly.
+"""
+
+import argparse
+import json
+import torch
+from pathlib import Path
+from tqdm import tqdm
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    TrainingArguments,
+    Trainer,
+)
+from peft import LoraConfig, get_peft_model, TaskType
+from datasets import Dataset
+
+from src.data import create_splits, SYSTEM_PROMPT, label_to_option
+from src.evaluate import evaluate_all
+
+
+def build_sft_dataset(split_data, tokenizer) -> Dataset:
+    """
+    Build SFT dataset: input = BBQ prompt, target = correct answer option.
+
+    Each training example is a chat with:
+    - System: SYSTEM_PROMPT
+    - User: BBQ prompt
+    - Assistant: "<think>\n[answer explanation]\n</think>\n<answer>(x)</answer>"
+    """
+    texts = []
+    for example in split_data:
+        correct_option = label_to_option(example["answer_label"])
+
+        # Simple reasoning template (no real CoT — just the answer with minimal explanation)
+        if example["context_condition"] == "ambig":
+            assistant_response = (
+                f"<think>\nThe context does not provide enough information "
+                f"to determine the answer.\n</think>\n"
+                f"<answer>{correct_option}</answer>"
+            )
+        else:
+            assistant_response = (
+                f"<think>\nBased on the information provided in the context, "
+                f"the answer can be determined.\n</think>\n"
+                f"<answer>{correct_option}</answer>"
+            )
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": example["prompt"]},
+            {"role": "assistant", "content": assistant_response},
+        ]
+
+        text = tokenizer.apply_chat_template(messages, tokenize=False)
+        texts.append({"text": text})
+
+    return Dataset.from_list(texts)
+
+
+def train_sft(
+    model_name: str = "Qwen/Qwen2.5-3B-Instruct",
+    n_train: int = 1000,
+    n_eval: int = 500,
+    epochs: int = 3,
+    lr: float = 2e-5,
+    batch_size: int = 4,
+    gradient_accumulation: int = 4,
+    lora_r: int = 16,
+    lora_alpha: int = 32,
+    max_seq_length: int = 768,
+    output_dir: str = "results/sft",
+    device: str = "auto",
+):
+    """
+    Train SFT baseline on BBQ.
+
+    Args:
+        model_name: HuggingFace model name
+        n_train: number of training samples
+        n_eval: number of eval samples
+        epochs: training epochs
+        lr: learning rate
+        batch_size: per-device batch size
+        gradient_accumulation: gradient accumulation steps
+        lora_r: LoRA rank
+        lora_alpha: LoRA alpha
+        max_seq_length: max sequence length
+        output_dir: directory to save model and results
+        device: device map
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # ── Load model ─────────────────────────────────────────
+    print(f"Loading model: {model_name}")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.float16,
+        device_map=device,
+        trust_remote_code=True,
+    )
+
+    # ── LoRA ───────────────────────────────────────────────
+    lora_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=0.05,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    # ── Load data ──────────────────────────────────────────
+    print("Loading BBQ dataset...")
+    splits = create_splits(n_train=n_train, n_eval=n_eval)
+
+    train_dataset = build_sft_dataset(splits["train"], tokenizer)
+    print(f"Training samples: {len(train_dataset)}")
+
+    # Tokenize
+    def tokenize(example):
+        tokens = tokenizer(
+            example["text"],
+            truncation=True,
+            max_length=max_seq_length,
+            padding="max_length",
+        )
+        tokens["labels"] = tokens["input_ids"].copy()
+        return tokens
+
+    train_dataset = train_dataset.map(tokenize, remove_columns=["text"])
+
+    # ── Train ──────────────────────────────────────────────
+    training_args = TrainingArguments(
+        output_dir=str(output_path / "checkpoints"),
+        num_train_epochs=epochs,
+        per_device_train_batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation,
+        learning_rate=lr,
+        fp16=True,
+        logging_steps=10,
+        save_strategy="epoch",
+        report_to="none",
+        remove_unused_columns=False,
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+    )
+
+    print("Starting SFT training...")
+    trainer.train()
+
+    # Save adapter
+    model.save_pretrained(str(output_path / "adapter"))
+    tokenizer.save_pretrained(str(output_path / "adapter"))
+    print(f"Adapter saved to {output_path / 'adapter'}")
+
+    # ── Evaluate ───────────────────────────────────────────
+    print("\nRunning evaluation...")
+    model.eval()
+
+    eval_data = []
+    for i in range(min(n_eval, len(splits["eval_ambiguous"]))):
+        eval_data.append(splits["eval_ambiguous"][i])
+    for i in range(min(n_eval, len(splits["eval_disambiguated"]))):
+        eval_data.append(splits["eval_disambiguated"][i])
+
+    predictions = []
+    for example in tqdm(eval_data, desc="Evaluating"):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": example["prompt"]},
+        ]
+        prompt_text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=512,
+                do_sample=False,
+                temperature=1.0,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+
+        generated = tokenizer.decode(
+            outputs[0][inputs["input_ids"].shape[1] :],
+            skip_special_tokens=True,
+        )
+
+        predictions.append({
+            "model_output": generated,
+            "answer_label": example["answer_label"],
+            "context_condition": example["context_condition"],
+            "category": example["category"],
+            "prompt": example["prompt"],
+            "target_label": example.get("target_label"),
+        })
+
+    results = evaluate_all(
+        predictions,
+        output_path=str(output_path / "metrics.json"),
+    )
+
+    with open(output_path / "predictions.json", "w") as f:
+        json.dump(predictions, f, indent=2)
+
+    return results, predictions
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train SFT baseline on BBQ")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
+    parser.add_argument("--n-train", type=int, default=1000)
+    parser.add_argument("--n-eval", type=int, default=500)
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--output-dir", type=str, default="results/sft")
+    parser.add_argument("--device", type=str, default="auto")
+    args = parser.parse_args()
+
+    train_sft(
+        model_name=args.model,
+        n_train=args.n_train,
+        n_eval=args.n_eval,
+        epochs=args.epochs,
+        lr=args.lr,
+        batch_size=args.batch_size,
+        output_dir=args.output_dir,
+        device=args.device,
+    )
