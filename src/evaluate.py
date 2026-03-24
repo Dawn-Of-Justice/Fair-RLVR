@@ -377,32 +377,162 @@ def evaluate_all(
     return results
 
 
+# ── Inference + Evaluation ─────────────────────────────────
+
+def run_evaluation(
+    checkpoint: str,
+    model_name: str = "Qwen/Qwen2.5-3B-Instruct",
+    n_eval: int = 500,
+    max_new_tokens: int = 512,
+    output_dir: str = "results/eval",
+    run_faithfulness: bool = False,
+    device: str = "auto",
+):
+    """
+    Load a trained adapter checkpoint, run inference on BBQ, and compute all metrics.
+
+    Args:
+        checkpoint: path to the LoRA adapter directory (e.g. results/fair_rlvr/final_adapter)
+        model_name: base model name
+        n_eval: number of eval samples per condition (ambig + disambig)
+        max_new_tokens: max tokens for generation
+        output_dir: directory to save results
+        run_faithfulness: whether to run the faithfulness test (Experiment 4)
+        device: device to use
+    """
+    import torch
+    from tqdm import tqdm
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from peft import PeftModel
+    from src.data import create_splits, SYSTEM_PROMPT
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # ── Load base model + adapter ─────────────────────────
+    print(f"Loading base model: {model_name}")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    base_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.float16,
+        device_map=device,
+        trust_remote_code=True,
+    )
+
+    print(f"Loading adapter from: {checkpoint}")
+    model = PeftModel.from_pretrained(base_model, checkpoint)
+    model.eval()
+
+    # ── Load eval data ────────────────────────────────────
+    print("Loading BBQ eval data...")
+    splits = create_splits(n_train=100, n_eval=n_eval)
+
+    eval_data = []
+    for i in range(min(n_eval, len(splits["eval_ambiguous"]))):
+        eval_data.append(splits["eval_ambiguous"][i])
+    for i in range(min(n_eval, len(splits["eval_disambiguated"]))):
+        eval_data.append(splits["eval_disambiguated"][i])
+
+    print(f"Eval samples: {len(eval_data)}")
+
+    # ── Run inference ─────────────────────────────────────
+    print("Running inference...")
+    predictions = []
+
+    for example in tqdm(eval_data, desc="Evaluating"):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": example["prompt"]},
+        ]
+
+        prompt_text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+
+        generated = tokenizer.decode(
+            outputs[0][inputs["input_ids"].shape[1]:],
+            skip_special_tokens=True,
+        )
+
+        predictions.append({
+            "model_output": generated,
+            "answer_label": example["answer_label"],
+            "context_condition": example["context_condition"],
+            "category": example["category"],
+            "target_label": example.get("target_label"),
+            "prompt": example["prompt"],
+        })
+
+    # ── Evaluate ──────────────────────────────────────────
+    results = evaluate_all(
+        predictions,
+        model=model if run_faithfulness else None,
+        tokenizer=tokenizer if run_faithfulness else None,
+        run_faithfulness=run_faithfulness,
+        output_path=str(output_path / "metrics.json"),
+    )
+
+    # Save predictions
+    with open(output_path / "predictions.json", "w") as f:
+        json.dump(predictions, f, indent=2)
+    print(f"Predictions saved to {output_path / 'predictions.json'}")
+
+    # Print sample outputs
+    print("\n" + "=" * 60)
+    print("SAMPLE OUTPUTS (first 5)")
+    print("=" * 60)
+    for pred in predictions[:5]:
+        print(f"\n--- [{pred['category']}] [{pred['context_condition']}] ---")
+        print(f"Prompt: {pred['prompt'][:200]}...")
+        print(f"Model output: {pred['model_output'][:300]}")
+        print(f"Correct answer: {pred['answer_label']}")
+        print()
+
+    return results, predictions
+
+
 # ── CLI ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Quick test with synthetic predictions
-    print("Running evaluation with synthetic test data...\n")
+    import argparse
 
-    fake_predictions = [
-        # Correct on ambiguous (says Unknown)
-        {"model_output": "<think>There is no information to determine who did it.</think>\n<answer>(c)</answer>",
-         "answer_label": 2, "context_condition": "ambig", "category": "age", "target_label": 0},
-        # Wrong on ambiguous (picked stereotype)
-        {"model_output": "<think>Old people can't use phones.</think>\n<answer>(a)</answer>",
-         "answer_label": 2, "context_condition": "ambig", "category": "age", "target_label": 0},
-        # Correct on disambiguated
-        {"model_output": "<think>The context says the young person was confused.</think>\n<answer>(b)</answer>",
-         "answer_label": 1, "context_condition": "disambig", "category": "age", "target_label": 0},
-        # Wrong on disambiguated (non-stereotype error)
-        {"model_output": "<think>Not sure.</think>\n<answer>(a)</answer>",
-         "answer_label": 1, "context_condition": "disambig", "category": "gender_identity", "target_label": 2},
-        # Correct on ambiguous
-        {"model_output": "<think>The passage does not specify gender. Cannot determine.</think>\n<answer>(c)</answer>",
-         "answer_label": 2, "context_condition": "ambig", "category": "gender_identity", "target_label": 1},
-    ]
+    parser = argparse.ArgumentParser(description="Evaluate a Fair-RLVR checkpoint on BBQ")
+    parser.add_argument("--checkpoint", type=str, required=True,
+                        help="Path to LoRA adapter directory (e.g. results/fair_rlvr/final_adapter)")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct",
+                        help="Base model name")
+    parser.add_argument("--n-eval", type=int, default=500,
+                        help="Eval samples per condition")
+    parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Output directory (defaults to checkpoint parent dir)")
+    parser.add_argument("--run-faithfulness", action="store_true",
+                        help="Run Experiment 4: causal faithfulness test")
+    parser.add_argument("--device", type=str, default="auto")
+    args = parser.parse_args()
 
-    results = evaluate_all(fake_predictions, output_path="results/test_eval.json")
+    # Default output dir = same folder as checkpoint's parent
+    if args.output_dir is None:
+        args.output_dir = str(Path(args.checkpoint).parent)
 
-    print("\nPer-category bias breakdown:")
-    for cat, stats in results["bias"]["per_category"].items():
-        print(f"  {cat}: bias_score={stats['bias_score']:.2f} ({stats['stereotype_errors']}/{stats['errors']} errors)")
+    run_evaluation(
+        checkpoint=args.checkpoint,
+        model_name=args.model,
+        n_eval=args.n_eval,
+        max_new_tokens=args.max_tokens,
+        output_dir=args.output_dir,
+        run_faithfulness=args.run_faithfulness,
+        device=args.device,
+    )
