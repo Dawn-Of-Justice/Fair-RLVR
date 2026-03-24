@@ -217,3 +217,10 @@ __marimo__/
 
 
 .claude
+
+#ignore training weights and checkpoints
+results/*/checkpoints/
+results/*/final_adapter/*.safetensors
+results/*/final_adapter/*.bin
+results/sft/adapter/*.safetensors
+results/sft/adapter/*.bin

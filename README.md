@@ -9,14 +9,15 @@ The model is trained to **reason through bias** in its chain-of-thought before a
 ## Key Idea
 
 ```
-R_total = R_correctness + λ · R_fairness - β · R_hacking_penalty
+R_total = R_correctness + λ · R_fairness - P_structural - P_leak
 ```
 
 | Component | What it does |
 |---|---|
-| `R_correctness` | Rewards valid `<think>` and `<answer>` format |
-| `R_fairness` | Rewards matching BBQ ground-truth label |
-| `R_hacking_penalty` | Penalizes fairness buzzwords without real logic |
+| `R_correctness` | Rewards valid `<think>` and `<answer>` format (+1 / -1) |
+| `R_fairness` | Rewards matching BBQ ground-truth label (+1 / 0) |
+| `P_structural` | Penalizes answer leaking, short reasoning, content outside tags |
+| `P_leak` | Sentence-BERT similarity penalty — catches fake reasoning |
 
 ## Why Not Just RLHF?
 
@@ -27,20 +28,77 @@ R_total = R_correctness + λ · R_fairness - β · R_hacking_penalty
 | Fake fairness | Model says what sounds safe | Model must reason correctly to get reward |
 | Scalability | Expensive human annotation | Fully automated verifier |
 
+## Baseline Results
+
+| Condition | BBQ-Ambig | BBQ-Disambig | Bias Score | Abstention |
+|---|---|---|---|---|
+| Zero-shot | 82.4% | 89.8% | 0.561 | 0.0% |
+| SFT | 89.4% | 87.6% | 0.358 | 0.0% |
+| GRPO (correctness only) | — | — | — | — |
+| **Fair-RLVR (ours)** | — | — | — | — |
+
+*Results for GRPO correctness-only and Fair-RLVR pending evaluation.*
+
 ## Project Structure
 
 ```
-RLVR/
-├── main.tex              # IEEE paper (LaTeX)
-├── references.bib        # Bibliography
-├── RLVR.png              # Methodology diagram
-├── src/                  # Training code (TODO)
-│   ├── train.py          # GRPO training loop
-│   ├── reward.py         # Composite reward function
-│   ├── data.py           # BBQ dataset loading
-│   └── evaluate.py       # Evaluation pipeline
-├── configs/              # Hyperparameter configs (TODO)
-└── results/              # Experiment outputs (TODO)
+Fair-RLVR/
+├── main.tex                # IEEE paper (LaTeX)
+├── references.bib          # Bibliography
+├── RLVR.png                # Methodology diagram
+├── setup.py                # Package install
+├── requirements.txt        # Dependencies
+├── src/
+│   ├── train.py            # GRPO training loop
+│   ├── reward.py           # Composite reward function
+│   ├── data.py             # BBQ dataset loading & splits
+│   ├── evaluate.py         # Evaluation pipeline
+│   ├── callbacks.py        # Training callbacks & logging
+│   └── baselines/
+│       ├── zero_shot.py    # Zero-shot baseline
+│       └── sft.py          # SFT baseline
+├── configs/
+│   ├── fair_rlvr.yaml      # Main experiment config
+│   ├── grpo_correctness_only.yaml
+│   ├── lambda_sweep.yaml   # λ ablation configs
+│   └── dry_run.yaml        # Quick test config
+└── results/                # Experiment outputs (metrics only, weights excluded)
+    ├── zero_shot/
+    ├── sft/
+    ├── grpo_correctness_only/
+    └── fair_rlvr/
+```
+
+## Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/Dawn-Of-Justice/RLVR.git
+cd RLVR
+pip install -e .
+pip install -r requirements.txt
+
+# Step 1: Dry run (verify everything works)
+python -m src.train --dry-run
+
+# Step 2: Baselines
+python -m src.baselines.zero_shot --n-eval 500
+python -m src.baselines.sft --n-train 1000 --n-eval 500
+
+# Step 3: GRPO correctness-only baseline
+python -m src.train --config configs/grpo_correctness_only.yaml
+
+# Step 4: Fair-RLVR (main experiment)
+python -m src.train --config configs/fair_rlvr.yaml
+
+# Step 5: Lambda sweep
+python -m src.train --lambda-fair 0.1 --output-dir results/lambda_0.1
+python -m src.train --lambda-fair 0.3 --output-dir results/lambda_0.3
+python -m src.train --lambda-fair 0.7 --output-dir results/lambda_0.7
+python -m src.train --lambda-fair 1.0 --output-dir results/lambda_1.0
+
+# Step 6: Evaluate
+python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter
 ```
 
 ## Experiments
@@ -58,25 +116,30 @@ RLVR/
 
 - **BBQ Accuracy (Ambiguous)** — primary fairness metric
 - **BBQ Accuracy (Disambiguated)** — evidence-following ability
-- **Bias Score** — proportion of stereotype-consistent errors
+- **Bias Score** — proportion of stereotype-consistent errors (< 0.5 = fair)
 - **Abstention Rate** — over-refusal detection
-- **MMLU / GSM8K** — general reasoning (alignment tax check)
 
-## Quick Start
+## Training Setup
 
-```bash
-# Clone the repo
-git clone https://github.com/yourusername/Fair-RLVR.git
-cd Fair-RLVR
+| Component | Specification |
+|---|---|
+| Base Model | Qwen2.5-3B-Instruct |
+| Quantization | 4-bit (bitsandbytes) |
+| Adaptation | LoRA (r=16, α=32) |
+| Algorithm | GRPO (with DAPO fixes) |
+| Dataset | BBQ (~1,000 training samples) |
+| Training Steps | ~1,000 |
+| Hardware | NVIDIA H100 (80GB) |
 
-# Install dependencies
-pip install torch transformers trl peft unsloth datasets
+## Paper
 
-# Train (TODO — code not yet implemented)
-python src/train.py --lambda_fair 0.5 --beta_hack 0.1
-
-# Evaluate
-python src/evaluate.py --checkpoint outputs/checkpoint-1000
+```bibtex
+@inproceedings{fairrlvr2026,
+  title={Fair-RLVR: Teaching Reasoning Models to Be Fair via Verifiable Reward Signals},
+  author={Salo, E S and Ravi, Arjun G and Devanand, A and Rini Susan, V S},
+  booktitle={IEEE Conference},
+  year={2026}
+}
 ```
 
 ## References
@@ -84,10 +147,10 @@ python src/evaluate.py --checkpoint outputs/checkpoint-1000
 - [DeepSeek-R1](https://arxiv.org/abs/2501.12948) — Emergent reasoning via RL
 - [DeepSeekMath / GRPO](https://arxiv.org/abs/2402.03300) — Group Relative Policy Optimization
 - [BBQ Benchmark](https://arxiv.org/abs/2110.08193) — Bias Benchmark for QA
-- [Med-RLVR](https://arxiv.org/abs/2502.xxxxx) — Emergent medical reasoning via RLVR
 - [FairReason](https://arxiv.org/abs/2507.23067) — Balancing reasoning and social bias
 - [DAPO](https://arxiv.org/abs/2503.14476) — Stable GRPO training at scale
+- [Tarek et al.](https://arxiv.org/abs/2509.15557) — Reward hacking mitigation via composite rewards
 
 ## License
 
-MIT
+This project is licensed under the [MIT License](LICENSE).
