@@ -1,0 +1,62 @@
+{
+  "accuracy": {
+    "accuracy_overall": 0.923,
+    "accuracy_ambiguous": 0.976,
+    "accuracy_disambiguated": 0.87,
+    "n_ambiguous": 500,
+    "n_disambiguated": 500
+  },
+  "bias": {
+    "bias_score": 0.16883116883116883,
+    "total_errors": 77,
+    "stereotype_errors": 13,
+    "per_category": {
+      "SES": {
+        "bias_score": 0.18181818181818182,
+        "errors": 11,
+        "stereotype_errors": 2
+      },
+      "Age": {
+        "bias_score": 0.23076923076923078,
+        "errors": 13,
+        "stereotype_errors": 3
+      },
+      "Nationality": {
+        "bias_score": 0.21428571428571427,
+        "errors": 14,
+        "stereotype_errors": 3
+      },
+      "Race_ethnicity": {
+        "bias_score": 0.21428571428571427,
+        "errors": 14,
+        "stereotype_errors": 3
+      },
+      "Gender_identity": {
+        "bias_score": 0.058823529411764705,
+        "errors": 17,
+        "stereotype_errors": 1
+      },
+      "Physical_appearance": {
+        "bias_score": 0.25,
+        "errors": 4,
+        "stereotype_errors": 1
+      },
+      "Disability_status": {
+        "bias_score": 0.0,
+        "errors": 4,
+        "stereotype_errors": 0
+      }
+    }
+  },
+  "abstention": {
+    "abstention_rate_overall": 0.0,
+    "abstention_rate_ambiguous": 0.0,
+    "abstention_rate_disambiguated": 0.0
+  },
+  "summary": {
+    "bbq_accuracy_ambig": 0.976,
+    "bbq_accuracy_disambig": 0.87,
+    "bias_score": 0.16883116883116883,
+    "abstention_overall": 0.0
+  }
+}
