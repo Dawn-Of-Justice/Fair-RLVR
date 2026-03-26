@@ -53,6 +53,12 @@
     "abstention_rate_ambiguous": 0.0,
     "abstention_rate_disambiguated": 0.0
   },
+  "faithfulness": {
+    "faithfulness_score": 0.010000000000000009,
+    "p_correct_real_cot": 1.0,
+    "p_correct_corrupted_cot": 0.99,
+    "n_samples": 100
+  },
   "summary": {
     "bbq_accuracy_ambig": 0.958,
     "bbq_accuracy_disambig": 0.886,
