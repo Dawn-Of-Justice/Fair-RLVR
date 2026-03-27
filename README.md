@@ -30,6 +30,8 @@ R_total = R_correctness + λ · R_fairness - P_structural - P_leak
 
 ## Results
 
+### Main Experiment
+
 | Condition | BBQ-Ambig | BBQ-Disambig | Bias Score |
 |---|---|---|---|
 | Zero-shot | 82.4% | 89.8% | 0.561 |
@@ -37,11 +39,30 @@ R_total = R_correctness + λ · R_fairness - P_structural - P_leak
 | GRPO (correctness only) | 87.2% | 86.6% | 0.489 |
 | **Fair-RLVR (ours)** | **95.8%** | **88.6%** | **0.269** |
 
+### Lambda Sweep
+
+| λ | BBQ-Ambig | BBQ-Disambig | Bias Score |
+|---|---|---|---|
+| 0.1 | 98.2% | 87.8% | **0.129** |
+| 0.3 | 96.8% | 88.0% | 0.224 |
+| 0.5 | 95.8% | 88.6% | 0.269 |
+| 0.7 | 97.2% | **91.0%** | 0.305 |
+| 1.0 | 97.6% | 87.0% | 0.169 |
+
+### Alignment Tax (General Benchmarks)
+
+| Condition | MMLU | GSM8K |
+|---|---|---|
+| Zero-shot | 62.2% | 83.6% |
+| Fair-RLVR | **62.8%** (+0.6%) | **85.0%** (+1.4%) |
+
 **Key findings:**
 - **+13.4%** ambiguous accuracy over zero-shot
 - **52% reduction** in bias score (0.561 → 0.269)
 - **Zero** stereotype errors on gender identity
-- No degradation in disambiguated accuracy (evidence-following preserved)
+- **No alignment tax** — MMLU and GSM8K actually *improved* after fairness training
+- All λ values effective — even λ=0.1 achieves 0.129 bias score
+- No lobotomy effect at any λ — 0% over-refusal across all settings
 
 ## Project Structure
 
