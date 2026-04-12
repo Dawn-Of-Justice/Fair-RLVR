@@ -116,7 +116,7 @@ def train(
     tau: float = 0.85,
     learning_rate: float = 1e-5,
     num_train_steps: int = 1000,
-    group_size: int = 8,
+    group_size: int = 16,
     batch_size: int = 4,
     gradient_accumulation: int = 4,
     max_new_tokens: int = 512,
@@ -353,7 +353,7 @@ if __name__ == "__main__":
     # Training
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--group-size", type=int, default=8)
+    parser.add_argument("--group-size", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--grad-accum", type=int, default=4)
     parser.add_argument("--kl-coeff", type=float, default=0.01)
