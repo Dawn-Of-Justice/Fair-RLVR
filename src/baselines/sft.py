@@ -67,8 +67,7 @@ def build_sft_dataset(split_data, tokenizer) -> Dataset:
 
 def train_sft(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
-    n_train: int = 1000,
-    n_eval: int = 500,
+    train_ratio: float = 0.9,
     epochs: int = 3,
     lr: float = 2e-5,
     batch_size: int = 4,
@@ -84,8 +83,7 @@ def train_sft(
 
     Args:
         model_name: HuggingFace model name
-        n_train: number of training samples
-        n_eval: number of eval samples
+        train_ratio: fraction of BBQ used for training (default 0.9)
         epochs: training epochs
         lr: learning rate
         batch_size: per-device batch size
@@ -124,8 +122,8 @@ def train_sft(
     model.print_trainable_parameters()
 
     # ── Load data ──────────────────────────────────────────
-    print("Loading BBQ dataset...")
-    splits = create_splits(n_train=n_train, n_eval=n_eval)
+    print("Loading BBQ dataset (full 90/10 split)...")
+    splits = create_splits(train_ratio=train_ratio, seed=42)
 
     train_dataset = build_sft_dataset(splits["train"], tokenizer)
     print(f"Training samples: {len(train_dataset)}")
@@ -175,11 +173,7 @@ def train_sft(
     print("\nRunning evaluation...")
     model.eval()
 
-    eval_data = []
-    for i in range(min(n_eval, len(splits["eval_ambiguous"]))):
-        eval_data.append(splits["eval_ambiguous"][i])
-    for i in range(min(n_eval, len(splits["eval_disambiguated"]))):
-        eval_data.append(splits["eval_disambiguated"][i])
+    eval_data = [splits["eval"][i] for i in range(len(splits["eval"]))]
 
     predictions = []
     for example in tqdm(eval_data, desc="Evaluating"):
@@ -229,8 +223,7 @@ def train_sft(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train SFT baseline on BBQ")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--n-train", type=int, default=1000)
-    parser.add_argument("--n-eval", type=int, default=500)
+    parser.add_argument("--train-ratio", type=float, default=0.9)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--batch-size", type=int, default=4)
@@ -240,8 +233,7 @@ if __name__ == "__main__":
 
     train_sft(
         model_name=args.model,
-        n_train=args.n_train,
-        n_eval=args.n_eval,
+        train_ratio=args.train_ratio,
         epochs=args.epochs,
         lr=args.lr,
         batch_size=args.batch_size,

@@ -34,21 +34,29 @@ class FairRLVRCallback(TrainerCallback):
         output_dir: str = "results/training_logs",
         cot_checkpoint_steps: list[int] = None,
         n_cot_samples: int = 5,
+        dynamics_logger=None,
     ):
         """
         Args:
             output_dir: directory to save logs and CoT samples
             cot_checkpoint_steps: training steps at which to save CoT samples
             n_cot_samples: number of CoT samples to save per checkpoint
+            dynamics_logger: optional TrainingDynamicsLogger instance;
+                if provided, log_generation_batch will call log_step() on it.
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.cot_checkpoint_steps = cot_checkpoint_steps or [100, 250, 500, 750, 1000]
         self.n_cot_samples = n_cot_samples
+        self.dynamics_logger = dynamics_logger
 
-        # Running logs
+        # Running logs.
+        # step_logs: entries from on_step_end (TRL trainer log_history, lightweight).
+        # batch_logs: entries from log_generation_batch (detailed reward breakdown).
+        # Kept separate to avoid mixed schemas in the saved JSON.
         self.step_logs = []
+        self.batch_logs = []
         self.cot_samples = {}
 
     def on_step_end(self, args, state, control, **kwargs):
@@ -87,9 +95,16 @@ class FairRLVRCallback(TrainerCallback):
 
     def _save_logs(self, step):
         """Write accumulated logs to disk."""
+        # Trainer-level step logs (lightweight, from log_history)
         log_path = self.output_dir / "step_logs.json"
         with open(log_path, "w") as f:
             json.dump(self.step_logs, f, indent=2)
+
+        # Detailed reward-breakdown logs (from log_generation_batch)
+        if self.batch_logs:
+            batch_path = self.output_dir / "batch_logs.json"
+            with open(batch_path, "w") as f:
+                json.dump(self.batch_logs, f, indent=2)
 
         if self.cot_samples:
             cot_path = self.output_dir / "cot_samples.json"
@@ -116,15 +131,12 @@ class FairRLVRCallback(TrainerCallback):
             context_conditions: list of "ambig" or "disambig" (optional)
         """
         batch_stats = {
-            "r_correctness": [],
             "r_fairness": [],
             "p_structural": [],
-            "p_leak": [],
             "r_total": [],
             "abstained": 0,
             "total": 0,
             "correct": 0,
-            "stereotype_errors": 0,
             "total_errors": 0,
         }
 
@@ -132,10 +144,8 @@ class FairRLVRCallback(TrainerCallback):
 
         for i, (completion, label) in enumerate(zip(completions, ground_truth_labels)):
             result = compute_reward(completion, label)
-            batch_stats["r_correctness"].append(result["r_correctness"])
             batch_stats["r_fairness"].append(result["r_fairness"])
             batch_stats["p_structural"].append(result["p_structural"])
-            batch_stats["p_leak"].append(result["p_leak"])
             batch_stats["r_total"].append(result["r_total"])
             batch_stats["total"] += 1
 
@@ -147,8 +157,9 @@ class FairRLVRCallback(TrainerCallback):
             elif pred_idx != -1:
                 batch_stats["total_errors"] += 1
 
-            # Check abstention (answer is "Unknown" type — usually option (c) in ambiguous)
-            if answer and "c" in answer.lower():
+            # Check abstention (answer is "Unknown" type — usually option (c) in ambiguous).
+            # We use answer_to_index rather than a raw string check to avoid false matches.
+            if answer is not None and answer_to_index(answer) == 2:
                 batch_stats["abstained"] += 1
 
             # Collect CoT sample
@@ -170,15 +181,13 @@ class FairRLVRCallback(TrainerCallback):
         step_summary = {
             "step": step,
             "avg_r_total": sum(batch_stats["r_total"]) / n if n > 0 else 0,
-            "avg_r_correctness": sum(batch_stats["r_correctness"]) / n if n > 0 else 0,
             "avg_r_fairness": sum(batch_stats["r_fairness"]) / n if n > 0 else 0,
             "avg_p_structural": sum(batch_stats["p_structural"]) / n if n > 0 else 0,
-            "avg_p_leak": sum(batch_stats["p_leak"]) / n if n > 0 else 0,
             "accuracy": batch_stats["correct"] / n if n > 0 else 0,
             "abstention_rate": batch_stats["abstained"] / n if n > 0 else 0,
             "n_samples": n,
         }
-        self.step_logs.append(step_summary)
+        self.batch_logs.append(step_summary)
 
         # Save CoT samples at checkpoint steps
         if step in self.cot_checkpoint_steps:
@@ -187,6 +196,10 @@ class FairRLVRCallback(TrainerCallback):
             for ex in cot_examples[:2]:
                 print(f"  [{ex['category']}] correct={ex['is_correct']} | "
                       f"think: {ex['think'][:100]}...")
+
+        # Update dynamics logger if one was provided
+        if self.dynamics_logger is not None:
+            self.dynamics_logger.log_step(step, completions)
 
         return step_summary
 

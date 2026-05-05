@@ -382,7 +382,7 @@ def evaluate_all(
 def run_evaluation(
     checkpoint: str,
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
-    n_eval: int = 500,
+    n_eval: int = None,
     max_new_tokens: int = 512,
     output_dir: str = "results/eval",
     run_faithfulness: bool = False,
@@ -394,7 +394,7 @@ def run_evaluation(
     Args:
         checkpoint: path to the LoRA adapter directory (e.g. results/fair_rlvr/final_adapter)
         model_name: base model name
-        n_eval: number of eval samples per condition (ambig + disambig)
+        n_eval: max eval samples to run (None = use full 10% split, ~5,849 samples)
         max_new_tokens: max tokens for generation
         output_dir: directory to save results
         run_faithfulness: whether to run the faithfulness test (Experiment 4)
@@ -417,7 +417,7 @@ def run_evaluation(
 
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        dtype=torch.float16,
+        torch_dtype=torch.float16,
         device_map=device,
         trust_remote_code=True,
     )
@@ -427,16 +427,18 @@ def run_evaluation(
     model.eval()
 
     # ── Load eval data ────────────────────────────────────
-    print("Loading BBQ eval data...")
-    splits = create_splits(n_train=100, n_eval=n_eval)
+    print("Loading BBQ eval data (10% split)...")
+    splits = create_splits(train_ratio=0.9, seed=42)
+    eval_ds = splits["eval"]
 
-    eval_data = []
-    for i in range(min(n_eval, len(splits["eval_ambiguous"]))):
-        eval_data.append(splits["eval_ambiguous"][i])
-    for i in range(min(n_eval, len(splits["eval_disambiguated"]))):
-        eval_data.append(splits["eval_disambiguated"][i])
+    # Optionally cap eval size for faster iteration
+    if n_eval is not None:
+        eval_ds = eval_ds.select(range(min(n_eval, len(eval_ds))))
 
-    print(f"Eval samples: {len(eval_data)}")
+    eval_data = [eval_ds[i] for i in range(len(eval_ds))]
+    print(f"Eval samples: {len(eval_data)} "
+          f"(ambig: {sum(1 for e in eval_data if e['context_condition'] == 'ambig')}, "
+          f"disambig: {sum(1 for e in eval_data if e['context_condition'] == 'disambig')})")
 
     # ── Run inference ─────────────────────────────────────
     print("Running inference...")

@@ -5,8 +5,6 @@ Loads the Bias Benchmark for Question Answering (BBQ), formats prompts,
 and creates balanced train/eval splits for GRPO training.
 """
 
-import random
-from typing import Optional
 from datasets import load_dataset, concatenate_datasets, Dataset
 
 
@@ -93,116 +91,43 @@ def load_bbq_intersectional() -> Dataset:
 
 
 def create_splits(
-    n_train: int = 1000,
-    n_eval: int = 500,
-    ambiguous_ratio: float = 0.7,
+    train_ratio: float = 0.9,
     seed: int = 42,
-    holdout_categories: Optional[list] = None,
 ) -> dict:
     """
-    Create balanced train/eval splits from BBQ.
+    Create a 90/10 train/eval split from the full BBQ dataset (all 9 categories,
+    all 58,492 questions).
 
     Args:
-        n_train: Number of training samples.
-        n_eval: Number of evaluation samples.
-        ambiguous_ratio: Fraction of ambiguous context samples in training set.
+        train_ratio: Fraction of data used for training (default 0.9).
         seed: Random seed for reproducibility.
-        holdout_categories: Categories to hold out entirely for OOD eval.
-            Defaults to ["religion", "sexual_orientation"].
 
     Returns:
         Dictionary with keys:
-            - "train": training dataset (formatted)
-            - "eval_ambiguous": eval set, ambiguous context only
-            - "eval_disambiguated": eval set, disambiguated context only
-            - "eval_holdout": held-out categories for OOD testing
-            - "eval_intersectional": intersectional categories for OOD testing
+            - "train": training dataset (~52,643 samples at 90%)
+            - "eval":  evaluation dataset (~5,849 samples at 10%)
     """
-    if holdout_categories is None:
-        holdout_categories = ["religion", "sexual_orientation"]
+    # Load all 9 base BBQ categories
+    full_dataset = load_bbq_all()
 
-    random.seed(seed)
+    # 90/10 split using HuggingFace's built-in method (stratified by category)
+    splits = full_dataset.train_test_split(
+        test_size=1.0 - train_ratio,
+        seed=seed,
+        stratify_by_column="category",
+    )
 
-    # Separate train and holdout categories
-    train_categories = [c for c in BBQ_CATEGORIES if c not in holdout_categories]
-
-    # Load datasets
-    train_pool = load_bbq_all(train_categories)
-    holdout_pool = load_bbq_all(holdout_categories)
-    intersectional_pool = load_bbq_intersectional()
-
-    # Group indices by (category, context_condition)
-    cat_cond_indices = {}
-    for i, ex in enumerate(train_pool):
-        key = (ex["category"], ex["context_condition"])
-        cat_cond_indices.setdefault(key, []).append(i)
-
-    # Shuffle each group
-    for key in cat_cond_indices:
-        random.shuffle(cat_cond_indices[key])
-
-    # Balanced sampling: equal samples per category, then split ambig/disambig within each
-    n_cats = len(train_categories)
-    per_cat = n_train // n_cats
-    n_ambig_per_cat = int(per_cat * ambiguous_ratio)
-    n_disambig_per_cat = per_cat - n_ambig_per_cat
-
-    train_indices = []
-    for cat in train_categories:
-        cat_title = cat.replace("_", " ").title().replace(" ", "_")
-        # Try both naming conventions
-        ambig_key = None
-        disambig_key = None
-        for key in cat_cond_indices:
-            if key[0].lower().replace("_", "") == cat.lower().replace("_", "") and key[1] == "ambig":
-                ambig_key = key
-            if key[0].lower().replace("_", "") == cat.lower().replace("_", "") and key[1] == "disambig":
-                disambig_key = key
-
-        if ambig_key:
-            train_indices.extend(cat_cond_indices[ambig_key][:n_ambig_per_cat])
-        if disambig_key:
-            train_indices.extend(cat_cond_indices[disambig_key][:n_disambig_per_cat])
-
-    random.shuffle(train_indices)
-
-    # Collect remaining indices for eval
-    train_set = set(train_indices)
-    ambig_indices = [i for i in range(len(train_pool))
-                     if i not in train_set and train_pool[i]["context_condition"] == "ambig"]
-    disambig_indices = [i for i in range(len(train_pool))
-                        if i not in train_set and train_pool[i]["context_condition"] == "disambig"]
-
-    random.shuffle(ambig_indices)
-    random.shuffle(disambig_indices)
-
-    # Eval indices
-    eval_ambig_idx = ambig_indices[:n_eval]
-    eval_disambig_idx = disambig_indices[:n_eval]
-
-    # Build datasets
-    train_ds = train_pool.select(train_indices)
-    eval_ambig_ds = train_pool.select(eval_ambig_idx)
-    eval_disambig_ds = train_pool.select(eval_disambig_idx)
-
-    # Format all datasets with prompt column
     def add_prompt(example):
         example["prompt"] = format_bbq_prompt(example)
         example["answer_option"] = label_to_option(example["answer_label"])
         return example
 
-    train_ds = train_ds.map(add_prompt)
-    eval_ambig_ds = eval_ambig_ds.map(add_prompt)
-    eval_disambig_ds = eval_disambig_ds.map(add_prompt)
-    holdout_ds = holdout_pool.map(add_prompt)
-    intersectional_ds = intersectional_pool.map(add_prompt)
+    train_ds = splits["train"].map(add_prompt)
+    eval_ds = splits["test"].map(add_prompt)
 
     return {
         "train": train_ds,
-        "eval_ambiguous": eval_ambig_ds,
-        "eval_disambiguated": eval_disambig_ds,
-        "eval_holdout": holdout_ds,
-        "eval_intersectional": intersectional_ds,
+        "eval": eval_ds,
     }
 
 
@@ -233,32 +158,34 @@ def format_for_grpo(dataset: Dataset) -> list[dict]:
 
 # ── Quick test ──────────────────────────────────────────────
 if __name__ == "__main__":
-    print("Loading BBQ dataset...")
-    splits = create_splits(n_train=100, n_eval=50, seed=42)
+    from collections import Counter
+
+    print("Loading BBQ dataset (full 90/10 split)...")
+    splits = create_splits(seed=42)
 
     print(f"\nTrain size: {len(splits['train'])}")
-    print(f"Eval (ambiguous): {len(splits['eval_ambiguous'])}")
-    print(f"Eval (disambiguated): {len(splits['eval_disambiguated'])}")
-    print(f"Eval (holdout): {len(splits['eval_holdout'])}")
-    print(f"Eval (intersectional): {len(splits['eval_intersectional'])}")
+    print(f"Eval size:  {len(splits['eval'])}")
+    print(f"Total:      {len(splits['train']) + len(splits['eval'])}")
 
-    # Print 5 samples
+    # Print 3 samples
     print("\n" + "=" * 60)
     print("SAMPLE TRAINING PROMPTS")
     print("=" * 60)
-    for i in range(5):
+    for i in range(3):
         ex = splits["train"][i]
         print(f"\n--- Sample {i+1} [{ex['category']}] [{ex['context_condition']}] ---")
         print(ex["prompt"])
         print(f"Correct answer: {ex['answer_option']} (label={ex['answer_label']})")
 
-    # Verify category distribution
-    from collections import Counter
-    cats = Counter(splits["train"]["category"])
-    print("\n\nCategory distribution in training set:")
-    for cat, count in sorted(cats.items()):
-        print(f"  {cat}: {count}")
+    # Verify category distribution in train
+    cats_train = Counter(splits["train"]["category"])
+    cats_eval  = Counter(splits["eval"]["category"])
+    print("\n\nCategory distribution (train | eval):")
+    for cat in sorted(cats_train.keys()):
+        print(f"  {cat}: {cats_train[cat]} | {cats_eval.get(cat, 0)}")
 
     # Verify ambig/disambig ratio
     conditions = Counter(splits["train"]["context_condition"])
-    print(f"\nContext conditions: {dict(conditions)}")
+    print(f"\nContext conditions (train): {dict(conditions)}")
+    conditions_eval = Counter(splits["eval"]["context_condition"])
+    print(f"Context conditions (eval):  {dict(conditions_eval)}")

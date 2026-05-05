@@ -18,8 +18,7 @@ from src.evaluate import evaluate_all
 
 def run_zero_shot(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
-    n_eval_ambig: int = 500,
-    n_eval_disambig: int = 500,
+    n_eval: int = None,
     max_new_tokens: int = 512,
     batch_size: int = 8,
     output_dir: str = "results/zero_shot",
@@ -30,8 +29,7 @@ def run_zero_shot(
 
     Args:
         model_name: HuggingFace model name
-        n_eval_ambig: number of ambiguous eval samples
-        n_eval_disambig: number of disambiguated eval samples
+        n_eval: max eval samples (None = full 10% split, ~5,849 samples)
         max_new_tokens: max tokens for generation
         batch_size: inference batch size
         output_dir: directory to save results
@@ -55,16 +53,14 @@ def run_zero_shot(
     model.eval()
 
     # ── Load data ──────────────────────────────────────────
-    print("Loading BBQ dataset...")
-    splits = create_splits(n_train=100, n_eval=max(n_eval_ambig, n_eval_disambig))
+    print("Loading BBQ dataset (10% eval split)...")
+    splits = create_splits(train_ratio=0.9, seed=42)
+    eval_ds = splits["eval"]
 
-    # Combine ambiguous and disambiguated eval sets
-    eval_data = []
-    for i in range(min(n_eval_ambig, len(splits["eval_ambiguous"]))):
-        eval_data.append(splits["eval_ambiguous"][i])
-    for i in range(min(n_eval_disambig, len(splits["eval_disambiguated"]))):
-        eval_data.append(splits["eval_disambiguated"][i])
+    if n_eval is not None:
+        eval_ds = eval_ds.select(range(min(n_eval, len(eval_ds))))
 
+    eval_data = [eval_ds[i] for i in range(len(eval_ds))]
     print(f"Eval samples: {len(eval_data)}")
 
     # ── Run inference ──────────────────────────────────────
@@ -139,7 +135,8 @@ def run_zero_shot(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run zero-shot baseline on BBQ")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--n-eval", type=int, default=500, help="Eval samples per condition")
+    parser.add_argument("--n-eval", type=int, default=None,
+                        help="Max eval samples (default: full 10%% split)")
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--output-dir", type=str, default="results/zero_shot")
@@ -148,8 +145,7 @@ if __name__ == "__main__":
 
     run_zero_shot(
         model_name=args.model,
-        n_eval_ambig=args.n_eval,
-        n_eval_disambig=args.n_eval,
+        n_eval=args.n_eval,
         max_new_tokens=args.max_tokens,
         batch_size=args.batch_size,
         output_dir=args.output_dir,

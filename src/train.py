@@ -20,13 +20,13 @@ from trl import GRPOConfig, GRPOTrainer
 from datasets import Dataset
 
 from src.data import create_splits, format_bbq_prompt, SYSTEM_PROMPT
-from src.reward import compute_reward, extract_answer, answer_to_index
+from src.reward import compute_reward
 from src.callbacks import FairRLVRCallback, TrainingDynamicsLogger
 
 
 # ── Reward wrapper for GRPOTrainer ────────────────────────
 
-def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, tau: float = 0.85):
+def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5):
     """
     Create a reward function compatible with TRL's GRPOTrainer.
 
@@ -36,28 +36,24 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, tau: float 
     Args:
         ground_truth_map: dict mapping prompt text → ground truth label index
         lambda_fair: fairness reward weight
-        tau: semantic leak threshold
     """
     def reward_fn(completions, **kwargs):
         prompts = kwargs.get("prompts", [])
         rewards = []
         for i, completion in enumerate(completions):
-            # Look up ground truth for this prompt
             prompt_text = prompts[i] if i < len(prompts) else ""
-
-            # Try to find the ground truth label
             label = ground_truth_map.get(prompt_text, -1)
 
             if label == -1:
-                # Fallback: only score format correctness
-                from src.reward import reward_correctness
-                rewards.append(reward_correctness(completion))
+                # Prompt not found in ground truth map — return 0 and warn.
+                # This should not happen in normal training; check ground_truth_map build.
+                print(f"[WARNING] Ground truth not found for prompt (step {i}). Returning 0.")
+                rewards.append(0.0)
             else:
                 result = compute_reward(
                     text=completion,
                     ground_truth_label=label,
                     lambda_fair=lambda_fair,
-                    tau=tau,
                 )
                 rewards.append(result["r_total"])
 
@@ -110,15 +106,13 @@ def build_grpo_dataset(split_data, tokenizer) -> tuple[Dataset, dict]:
 
 def train(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
-    n_train: int = 1000,
-    n_eval: int = 500,
+    train_ratio: float = 0.9,
     lambda_fair: float = 0.5,
-    tau: float = 0.85,
     learning_rate: float = 1e-5,
-    num_train_steps: int = 1000,
+    num_train_steps: int = 3500,
     group_size: int = 16,
-    batch_size: int = 4,
-    gradient_accumulation: int = 4,
+    batch_size: int = 8,
+    gradient_accumulation: int = 2,
     max_new_tokens: int = 512,
     max_prompt_length: int = 512,
     lora_r: int = 16,
@@ -128,7 +122,7 @@ def train(
     clip_ratio_low: float = 0.20,
     use_4bit: bool = True,
     output_dir: str = "results/fair_rlvr",
-    save_steps: int = 250,
+    save_steps: int = 500,
     logging_steps: int = 10,
     seed: int = 42,
     dry_run: bool = False,
@@ -138,10 +132,8 @@ def train(
 
     Args:
         model_name: HuggingFace model name
-        n_train: number of BBQ training samples
-        n_eval: number of BBQ eval samples
+        train_ratio: fraction of full BBQ dataset used for training (default 0.9)
         lambda_fair: fairness reward weight
-        tau: semantic leak threshold
         learning_rate: learning rate
         num_train_steps: total training steps
         group_size: G — number of completions per prompt
@@ -165,22 +157,19 @@ def train(
     output_path.mkdir(parents=True, exist_ok=True)
 
     if dry_run:
-        n_train = 20
-        n_eval = 10
+        train_ratio = 0.01   # ~584 samples — enough to verify pipeline
         num_train_steps = 5
         save_steps = 5
         group_size = 2
         print("\n" + "=" * 50)
-        print("DRY RUN MODE — 5 steps, 20 samples")
+        print("DRY RUN MODE — 5 steps, ~1% of dataset")
         print("=" * 50 + "\n")
 
     # ── Save config ───────────────────────────────────────
     config = {
         "model_name": model_name,
-        "n_train": n_train,
-        "n_eval": n_eval,
+        "train_ratio": train_ratio,
         "lambda_fair": lambda_fair,
-        "tau": tau,
         "learning_rate": learning_rate,
         "num_train_steps": num_train_steps,
         "group_size": group_size,
@@ -232,27 +221,28 @@ def train(
     )
 
     # ── Load data ─────────────────────────────────────────
-    print("\nLoading BBQ dataset...")
-    splits = create_splits(n_train=n_train, n_eval=n_eval, seed=seed)
+    print("\nLoading BBQ dataset (full 90/10 split)...")
+    splits = create_splits(train_ratio=train_ratio, seed=seed)
 
     train_dataset, ground_truth_map = build_grpo_dataset(splits["train"], tokenizer)
     print(f"Training samples: {len(train_dataset)}")
+    print(f"Eval samples:     {len(splits['eval'])}")
     print(f"Ground truth map entries: {len(ground_truth_map)}")
 
     # ── Reward function ───────────────────────────────────
     reward_fn = make_reward_fn(
         ground_truth_map=ground_truth_map,
         lambda_fair=lambda_fair,
-        tau=tau,
     )
 
     # ── Callbacks ─────────────────────────────────────────
+    dynamics_logger = TrainingDynamicsLogger(
+        output_dir=str(output_path / "dynamics"),
+    )
     fair_callback = FairRLVRCallback(
         output_dir=str(output_path / "logs"),
         cot_checkpoint_steps=[100, 250, 500, 750, 1000],
-    )
-    dynamics_logger = TrainingDynamicsLogger(
-        output_dir=str(output_path / "dynamics"),
+        dynamics_logger=dynamics_logger,
     )
 
     # ── GRPO Config ───────────────────────────────────────
@@ -264,8 +254,14 @@ def train(
         learning_rate=learning_rate,
         num_generations=group_size,
         max_completion_length=max_new_tokens,
-        # KL and clipping
+        max_prompt_length=max_prompt_length,
+        # KL and DAPO asymmetric clipping
+        # epsilon      = low clip ratio  (standard lower bound)
+        # epsilon_high = high clip ratio (DAPO "Clip-Higher" strategy)
+        # Requires TRL >= 0.11 with DAPO support.
         beta=kl_coeff,
+        epsilon=clip_ratio_low,
+        epsilon_high=clip_ratio_high,
         # Logging and saving
         logging_steps=logging_steps,
         save_steps=save_steps,
@@ -300,7 +296,6 @@ def train(
     print(f"  Model: {model_name}")
     print(f"  Steps: {num_train_steps}")
     print(f"  λ (fairness): {lambda_fair}")
-    print(f"  τ (leak threshold): {tau}")
     print(f"  Group size: {group_size}")
     print(f"  4-bit: {use_4bit}")
     print("=" * 50 + "\n")
@@ -339,33 +334,32 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
 
     # Model
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
+    parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--no-4bit", action="store_true", help="Disable 4-bit quantization")
 
     # Data
-    parser.add_argument("--n-train", type=int, default=1000)
-    parser.add_argument("--n-eval", type=int, default=500)
+    parser.add_argument("--train-ratio", type=float, default=None,
+                        help="Fraction of BBQ used for training (default 0.9)")
 
     # Reward
-    parser.add_argument("--lambda-fair", type=float, default=0.5)
-    parser.add_argument("--tau", type=float, default=0.85)
+    parser.add_argument("--lambda-fair", type=float, default=None)
 
     # Training
-    parser.add_argument("--lr", type=float, default=1e-5)
-    parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--group-size", type=int, default=16)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--grad-accum", type=int, default=4)
-    parser.add_argument("--kl-coeff", type=float, default=0.01)
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--steps", type=int, default=None)
+    parser.add_argument("--group-size", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--grad-accum", type=int, default=None)
+    parser.add_argument("--kl-coeff", type=float, default=None)
 
     # LoRA
-    parser.add_argument("--lora-r", type=int, default=16)
-    parser.add_argument("--lora-alpha", type=int, default=32)
+    parser.add_argument("--lora-r", type=int, default=None)
+    parser.add_argument("--lora-alpha", type=int, default=None)
 
     # Output
-    parser.add_argument("--output-dir", type=str, default="results/fair_rlvr")
-    parser.add_argument("--save-steps", type=int, default=250)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--save-steps", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None)
 
     # Modes
     parser.add_argument("--dry-run", action="store_true", help="Run 5 steps to test pipeline")
@@ -378,25 +372,31 @@ if __name__ == "__main__":
         config_overrides = load_config(args.config)
         print(f"Loaded config from {args.config}")
 
-    # CLI args take precedence over config file
+    def _resolve(cli_val, config_key, default_val):
+        """Precedence: explicit CLI arg > config file value > hardcoded default."""
+        if cli_val is not None:
+            return cli_val
+        if config_key in config_overrides:
+            return config_overrides[config_key]
+        return default_val
+
+    # CLI args take precedence over config file, which takes precedence over defaults
     train_kwargs = {
-        "model_name": config_overrides.get("model_name", args.model),
-        "n_train": config_overrides.get("n_train", args.n_train),
-        "n_eval": config_overrides.get("n_eval", args.n_eval),
-        "lambda_fair": config_overrides.get("lambda_fair", args.lambda_fair),
-        "tau": config_overrides.get("tau", args.tau),
-        "learning_rate": config_overrides.get("learning_rate", args.lr),
-        "num_train_steps": config_overrides.get("num_train_steps", args.steps),
-        "group_size": config_overrides.get("group_size", args.group_size),
-        "batch_size": config_overrides.get("batch_size", args.batch_size),
-        "gradient_accumulation": config_overrides.get("gradient_accumulation", args.grad_accum),
-        "lora_r": config_overrides.get("lora_r", args.lora_r),
-        "lora_alpha": config_overrides.get("lora_alpha", args.lora_alpha),
-        "kl_coeff": config_overrides.get("kl_coeff", args.kl_coeff),
+        "model_name": _resolve(args.model, "model_name", "Qwen/Qwen2.5-3B-Instruct"),
+        "train_ratio": _resolve(args.train_ratio, "train_ratio", 0.9),
+        "lambda_fair": _resolve(args.lambda_fair, "lambda_fair", 0.5),
+        "learning_rate": _resolve(args.lr, "learning_rate", 1e-5),
+        "num_train_steps": _resolve(args.steps, "num_train_steps", 3500),
+        "group_size": _resolve(args.group_size, "group_size", 16),
+        "batch_size": _resolve(args.batch_size, "batch_size", 8),
+        "gradient_accumulation": _resolve(args.grad_accum, "gradient_accumulation", 2),
+        "lora_r": _resolve(args.lora_r, "lora_r", 16),
+        "lora_alpha": _resolve(args.lora_alpha, "lora_alpha", 32),
+        "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),
         "use_4bit": not args.no_4bit,
-        "output_dir": config_overrides.get("output_dir", args.output_dir),
-        "save_steps": config_overrides.get("save_steps", args.save_steps),
-        "seed": config_overrides.get("seed", args.seed),
+        "output_dir": _resolve(args.output_dir, "output_dir", "results/fair_rlvr"),
+        "save_steps": _resolve(args.save_steps, "save_steps", 500),
+        "seed": _resolve(args.seed, "seed", 42),
         "dry_run": args.dry_run,
     }
 
