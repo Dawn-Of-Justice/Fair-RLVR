@@ -80,17 +80,17 @@ Fair-RLVR/
 │   ├── evaluate.py         # Evaluation pipeline
 │   ├── callbacks.py        # Training callbacks & logging
 │   └── baselines/
-│       ├── zero_shot.py    # Zero-shot baseline
-│       └── sft.py          # SFT baseline
+│       ├── baseline_model.py   # Zero-shot baseline (no training)
+│       ├── sft.py              # SFT baseline
+│       └── grpo_no_fairness.py # GRPO λ=0 ablation baseline
 ├── configs/
 │   ├── fair_rlvr.yaml      # Main experiment config
-│   ├── grpo_correctness_only.yaml
 │   ├── lambda_sweep.yaml   # λ ablation configs
 │   └── dry_run.yaml        # Quick test config
 └── results/                # Experiment outputs (metrics only, weights excluded)
-    ├── zero_shot/
+    ├── baseline_model/
     ├── sft/
-    ├── grpo_correctness_only/
+    ├── grpo_no_fairness/
     └── fair_rlvr/
 ```
 
@@ -107,11 +107,12 @@ pip install -r requirements.txt
 python -m src.train --dry-run
 
 # Step 2: Baselines
-python -m src.baselines.zero_shot --n-eval 500
-python -m src.baselines.sft --n-train 1000 --n-eval 500
+python -m src.baselines.baseline_model
+python -m src.baselines.sft
+python -m src.baselines.grpo_no_fairness
 
-# Step 3: GRPO correctness-only baseline
-python -m src.train --config configs/grpo_correctness_only.yaml
+# Step 3: Main training
+
 
 # Step 4: Fair-RLVR (main experiment)
 python -m src.train --config configs/fair_rlvr.yaml

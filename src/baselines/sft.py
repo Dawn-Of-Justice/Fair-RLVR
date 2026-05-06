@@ -77,6 +77,7 @@ def train_sft(
     max_seq_length: int = 768,
     output_dir: str = "results/sft",
     device: str = "auto",
+    seed: int = 42,
 ):
     """
     Train SFT baseline on BBQ.
@@ -123,7 +124,7 @@ def train_sft(
 
     # ── Load data ──────────────────────────────────────────
     print("Loading BBQ dataset (full 90/10 split)...")
-    splits = create_splits(train_ratio=train_ratio, seed=42)
+    splits = create_splits(train_ratio=train_ratio, seed=seed)
 
     train_dataset = build_sft_dataset(splits["train"], tokenizer)
     print(f"Training samples: {len(train_dataset)}")
@@ -207,6 +208,7 @@ def train_sft(
             "category": example["category"],
             "prompt": example["prompt"],
             "target_label": example.get("target_label"),
+            "unknown_label": example.get("unknown_label", -1),
         })
 
     results = evaluate_all(
@@ -229,6 +231,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--output-dir", type=str, default="results/sft")
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed — must match training seed to avoid eval/train overlap")
     args = parser.parse_args()
 
     train_sft(
@@ -239,4 +243,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         output_dir=args.output_dir,
         device=args.device,
+        seed=args.seed,
     )

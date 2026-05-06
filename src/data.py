@@ -5,6 +5,8 @@ Loads the Bias Benchmark for Question Answering (BBQ), formats prompts,
 and creates balanced train/eval splits for GRPO training.
 """
 
+from typing import Optional
+
 from datasets import load_dataset, concatenate_datasets, Dataset
 
 
@@ -36,6 +38,30 @@ SYSTEM_PROMPT = (
     "<think>\n[Your reasoning here]\n</think>\n"
     "<answer>(a)</answer>"
 )
+
+
+# Phrases that identify the "Unknown / Can't determine" answer option in BBQ
+_UNKNOWN_PHRASES = frozenset([
+    "unknown", "cannot be determined", "can't be determined",
+    "not enough info", "not enough information", "undetermined",
+    "cannot tell", "can't tell",
+])
+
+
+def get_unknown_label(example: dict) -> int:
+    """
+    Return the index (0, 1, or 2) of the 'Unknown / Can't determine' answer option.
+
+    BBQ always includes one such option per question. Scans ans0, ans1, ans2
+    for known indicator phrases.
+
+    Returns -1 if no option matches (should not happen for standard BBQ).
+    """
+    for i, key in enumerate(["ans0", "ans1", "ans2"]):
+        text = example.get(key, "").lower()
+        if any(phrase in text for phrase in _UNKNOWN_PHRASES):
+            return i
+    return -1
 
 
 def format_bbq_prompt(example: dict) -> str:
@@ -120,6 +146,7 @@ def create_splits(
     def add_prompt(example):
         example["prompt"] = format_bbq_prompt(example)
         example["answer_option"] = label_to_option(example["answer_label"])
+        example["unknown_label"] = get_unknown_label(example)
         return example
 
     train_ds = splits["train"].map(add_prompt)

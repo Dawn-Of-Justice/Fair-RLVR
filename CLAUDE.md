@@ -29,8 +29,9 @@ python -m src.train --config configs/fair_rlvr.yaml
 python -m src.train --lambda-fair 0.1 --output-dir results/lambda_0.1
 
 # Run baselines
-python -m src.baselines.zero_shot --n-eval 500
-python -m src.baselines.sft --n-train 1000 --n-eval 500
+python -m src.baselines.baseline_model
+python -m src.baselines.sft
+python -m src.baselines.grpo_no_fairness
 
 # Evaluate a trained adapter
 python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter

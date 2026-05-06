@@ -118,6 +118,7 @@ class FairRLVRCallback(TrainerCallback):
         ground_truth_labels: list[int],
         categories: list[str] = None,
         context_conditions: list[str] = None,
+        unknown_labels: list[int] = None,
     ):
         """
         Log detailed reward breakdown and CoT samples for a batch.
@@ -129,6 +130,7 @@ class FairRLVRCallback(TrainerCallback):
             ground_truth_labels: list of BBQ ground truth labels
             categories: list of BBQ categories (optional)
             context_conditions: list of "ambig" or "disambig" (optional)
+            unknown_labels: list of unknown option indices (0/1/2) from get_unknown_label() (optional)
         """
         batch_stats = {
             "r_fairness": [],
@@ -157,9 +159,11 @@ class FairRLVRCallback(TrainerCallback):
             elif pred_idx != -1:
                 batch_stats["total_errors"] += 1
 
-            # Check abstention (answer is "Unknown" type — usually option (c) in ambiguous).
-            # We use answer_to_index rather than a raw string check to avoid false matches.
-            if answer is not None and answer_to_index(answer) == 2:
+            # Check abstention: model picked the "Unknown" option.
+            # Use the per-question unknown_label index if available; do NOT hardcode index 2
+            # since "Unknown" can be option (a), (b), or (c) depending on the question.
+            unknown_idx = unknown_labels[i] if unknown_labels is not None else -1
+            if unknown_idx != -1 and pred_idx == unknown_idx:
                 batch_stats["abstained"] += 1
 
             # Collect CoT sample
