@@ -82,7 +82,7 @@ python -m src.data
 ### Callbacks (`src/callbacks.py`)
 - `FairRLVRCallback`: logs reward mean/std per step via `on_step_end`; saves CoT samples at configurable checkpoint steps (default: 100, 500, 1000, 1500, 2000, 2500, 3000, 3500)
 - `TrainingDynamicsLogger`: classifies each batch into one of 6 training phases (Format Failure → Reintegrated Reasoning) tracking reward hacking progression
-- `log_generation_batch()` provides detailed per-batch metrics but is **not called automatically by GRPOTrainer** — run `evaluate.py --checkpoint <path>` post-hoc for detailed CoT analysis
+- `log_generation_batch()` is called automatically from inside `make_reward_fn()` in `train.py` — the reward function is the only point where GRPOTrainer exposes raw completions, so phase tracking and CoT logging happen live during training
 
 ## Key Design Decisions
 

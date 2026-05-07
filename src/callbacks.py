@@ -122,7 +122,9 @@ class FairRLVRCallback(TrainerCallback):
     ):
         """
         Log detailed reward breakdown and CoT samples for a batch.
-        Call this manually from the training loop after each generation.
+
+        Called automatically from make_reward_fn() in train.py — the reward
+        function is the only point where GRPOTrainer exposes raw completions.
 
         Args:
             step: current training step

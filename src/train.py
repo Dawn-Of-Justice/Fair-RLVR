@@ -26,27 +26,35 @@ from src.callbacks import FairRLVRCallback, TrainingDynamicsLogger
 
 # ── Reward wrapper for GRPOTrainer ────────────────────────
 
-def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5):
+def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=None):
     """
     Create a reward function compatible with TRL's GRPOTrainer.
 
-    GRPOTrainer calls: reward_fn(completions, prompts=prompts)
-    where completions is a list of strings and prompts is a list of prompt strings.
+    GRPOTrainer calls: reward_fn(completions, prompts=prompts, **dataset_columns)
+    Extra dataset columns (category, context_condition, unknown_label) are forwarded
+    via kwargs when remove_unused_columns=False is set in GRPOConfig.
 
     Args:
         ground_truth_map: dict mapping prompt text → ground truth label index
         lambda_fair: fairness reward weight
+        callback: optional FairRLVRCallback — if provided, log_generation_batch()
+                  is called each step so phase tracking and CoT logs are populated
     """
+    step_counter = [0]  # mutable so the closure can increment it
+
     def reward_fn(completions, **kwargs):
         prompts = kwargs.get("prompts", [])
+        categories = kwargs.get("category", [None] * len(completions))
+        context_conditions = kwargs.get("context_condition", [None] * len(completions))
+        unknown_labels = kwargs.get("unknown_label", [None] * len(completions))
+
         rewards = []
+        labels = []
         for i, completion in enumerate(completions):
             prompt_text = prompts[i] if i < len(prompts) else ""
             label = ground_truth_map.get(prompt_text, -1)
 
             if label == -1:
-                # Prompt not found in ground truth map — return 0 and warn.
-                # This should not happen in normal training; check ground_truth_map build.
                 print(f"[WARNING] Ground truth not found for prompt (step {i}). Returning 0.")
                 rewards.append(0.0)
             else:
@@ -56,6 +64,25 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5):
                     lambda_fair=lambda_fair,
                 )
                 rewards.append(result["r_total"])
+            labels.append(label)
+
+        # Wire into callback for live phase tracking and CoT logging
+        if callback is not None:
+            step_counter[0] += 1
+            valid = [(c, l, cat, cond, unk)
+                     for c, l, cat, cond, unk
+                     in zip(completions, labels, categories, context_conditions, unknown_labels)
+                     if l != -1]
+            if valid:
+                v_completions, v_labels, v_cats, v_conds, v_unks = zip(*valid)
+                callback.log_generation_batch(
+                    step=step_counter[0],
+                    completions=list(v_completions),
+                    ground_truth_labels=list(v_labels),
+                    categories=list(v_cats),
+                    context_conditions=list(v_conds),
+                    unknown_labels=list(v_unks),
+                )
 
         return rewards
 
@@ -94,6 +121,7 @@ def build_grpo_dataset(split_data, tokenizer) -> tuple[Dataset, dict]:
             "prompt": prompt_str,
             "category": example["category"],
             "context_condition": example["context_condition"],
+            "unknown_label": example.get("unknown_label", -1),
         })
 
         ground_truth_map[prompt_str] = example["answer_label"]
@@ -229,12 +257,6 @@ def train(
     print(f"Eval samples:     {len(splits['eval'])}")
     print(f"Ground truth map entries: {len(ground_truth_map)}")
 
-    # ── Reward function ───────────────────────────────────
-    reward_fn = make_reward_fn(
-        ground_truth_map=ground_truth_map,
-        lambda_fair=lambda_fair,
-    )
-
     # ── Callbacks ─────────────────────────────────────────
     dynamics_logger = TrainingDynamicsLogger(
         output_dir=str(output_path / "dynamics"),
@@ -243,6 +265,15 @@ def train(
         output_dir=str(output_path / "logs"),
         cot_checkpoint_steps=[100, 500, 1000, 1500, 2000, 2500, 3000, 3500],
         dynamics_logger=dynamics_logger,
+    )
+
+    # ── Reward function ───────────────────────────────────
+    # Pass the callback so log_generation_batch() is called from inside the
+    # reward function — the only place GRPOTrainer exposes raw completions.
+    reward_fn = make_reward_fn(
+        ground_truth_map=ground_truth_map,
+        lambda_fair=lambda_fair,
+        callback=fair_callback,
     )
 
     # ── GRPO Config ───────────────────────────────────────
