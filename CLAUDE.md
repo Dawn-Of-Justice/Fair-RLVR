@@ -59,10 +59,11 @@ python -m src.data
 ### Reward function (`src/reward.py`)
 - `compute_reward()` is the core function — returns a dict with all reward components
 - `reward_fairness()` extracts the `<answer>` tag, maps `(a)/(b)/(c)` to index 0/1/2, returns +1.0 if it matches BBQ ground truth label, else 0.0
-- `penalty_structural()` checks three rule-based violations, each costing 0.3 (max penalty = 0.9):
-  1. Answer leaked into `<think>` block
-  2. Reasoning too short (< 20 tokens in `<think>`)
-  3. Content exists outside `<think>`/`<answer>` tags
+- `penalty_structural()` checks four rule-based violations, each costing 0.3 (max penalty = 1.2):
+  1. Reasoning too short or `<think>` tag missing (< 20 tokens)
+  2. Missing `<answer>` tag entirely
+  3. Answer leaked into `<think>` block
+  4. Content exists outside `<think>`/`<answer>` tags
 - No SBERT dependency — `P_leak` (Sentence-BERT cosine similarity) was removed; single-letter MCQA answers never reach the τ=0.85 threshold
 
 ### Training (`src/train.py`)
@@ -88,7 +89,7 @@ python -m src.data
 - **Reward equation simplified to 2 components**: `R_total = λ · R_fairness - P_structural`
   - `R_correctness` removed: redundant once `P_structural` covers format violations; zeros out in GRPO group normalization once format is stable
   - `P_leak` (Sentence-BERT) removed: single-letter MCQA answers `(a)/(b)/(c)` never reach cosine similarity τ=0.85 against multi-sentence reasoning chains — dead code
-- **Lambda (`λ`)**: Controls fairness signal strength. Even `λ=0.1` achieves debiasing. Default is 0.5. Max reward at λ=0.5 is `0.5 × 1.0 = 0.5`; reward range is `[−0.9, 0.5]`.
+- **Lambda (`λ`)**: Controls fairness signal strength. Even `λ=0.1` achieves debiasing. Default is 0.5. Max reward at λ=0.5 is `0.5 × 1.0 = 0.5`; reward range is `[−1.2, 0.5]` (four simultaneous violations → −1.2).
 - **Training uses 4-bit quantization** (`bitsandbytes` nf4); evaluation loads in float16 without quantization.
 - **LoRA targets**: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` (all attention + MLP projections). All baselines use the same targets for equal parameter counts.
 - **Group size G=16**: Double the GRPO default — more diverse per-prompt samples for better advantage estimation.

@@ -23,10 +23,11 @@ R_total = λ · R_fairness - P_structural
 - Implemented in `src/reward.py` → `reward_fairness()`
 
 ### P_structural (structural penalty)
-Rule-based, checks three violations (each = 0.3 penalty, max 0.9):
-1. Answer leaking into `<think>` block (model reveals answer in reasoning)
-2. Reasoning too short (< 20 tokens in `<think>`)
-3. Content exists outside `<think>` / `<answer>` tags
+Rule-based, checks four violations (each = 0.3 penalty, max 1.2):
+1. Reasoning too short or `<think>` tag missing (< 20 tokens)
+2. Missing `<answer>` tag entirely — long think with no answer is not rewarded
+3. Answer leaking into `<think>` block (model reveals answer in reasoning)
+4. Content exists outside `<think>` / `<answer>` tags
 
 Based on: Tarek et al. "Reward Hacking Mitigation using Verifiable Composite Rewards" (2025)
 Implemented in `src/reward.py` → `penalty_structural()`

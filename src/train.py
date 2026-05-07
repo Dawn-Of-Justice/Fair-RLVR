@@ -282,6 +282,7 @@ def train(
     print("\nInitializing GRPOTrainer...")
     trainer = GRPOTrainer(
         model=model_name,
+        model_init_kwargs=model_kwargs,
         args=training_config,
         train_dataset=train_dataset,
         reward_funcs=reward_fn,

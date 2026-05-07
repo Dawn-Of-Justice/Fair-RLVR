@@ -34,12 +34,15 @@ def build_sft_dataset(split_data, tokenizer) -> Dataset:
     - System: SYSTEM_PROMPT
     - User: BBQ prompt
     - Assistant: "<think>\n[answer explanation]\n</think>\n<answer>(x)</answer>"
+
+    Stores prompt_text and full_text separately so the tokenize step can
+    mask prompt tokens (set labels=-100) and compute loss only on the
+    assistant response.
     """
-    texts = []
+    rows = []
     for example in split_data:
         correct_option = label_to_option(example["answer_label"])
 
-        # Simple reasoning template (no real CoT — just the answer with minimal explanation)
         if example["context_condition"] == "ambig":
             assistant_response = (
                 f"<think>\nThe context does not provide enough information "
@@ -53,16 +56,19 @@ def build_sft_dataset(split_data, tokenizer) -> Dataset:
                 f"<answer>{correct_option}</answer>"
             )
 
-        messages = [
+        prompt_messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": example["prompt"]},
-            {"role": "assistant", "content": assistant_response},
         ]
+        full_messages = prompt_messages + [{"role": "assistant", "content": assistant_response}]
 
-        text = tokenizer.apply_chat_template(messages, tokenize=False)
-        texts.append({"text": text})
+        prompt_text = tokenizer.apply_chat_template(
+            prompt_messages, tokenize=False, add_generation_prompt=True
+        )
+        full_text = tokenizer.apply_chat_template(full_messages, tokenize=False)
+        rows.append({"prompt_text": prompt_text, "full_text": full_text})
 
-    return Dataset.from_list(texts)
+    return Dataset.from_list(rows)
 
 
 def train_sft(
@@ -132,18 +138,33 @@ def train_sft(
     train_dataset = build_sft_dataset(splits["train"], tokenizer)
     print(f"Training samples: {len(train_dataset)}")
 
-    # Tokenize
+    # Tokenize: compute loss only on assistant tokens by masking prompt with -100
     def tokenize(example):
-        tokens = tokenizer(
-            example["text"],
+        prompt_ids = tokenizer(
+            example["prompt_text"],
+            truncation=True,
+            max_length=max_seq_length,
+        )["input_ids"]
+        full_tokens = tokenizer(
+            example["full_text"],
             truncation=True,
             max_length=max_seq_length,
             padding="max_length",
         )
-        tokens["labels"] = tokens["input_ids"].copy()
-        return tokens
+        labels = full_tokens["input_ids"].copy()
+        # Mask all prompt tokens — loss is computed only on the assistant response
+        prompt_len = len(prompt_ids)
+        labels[:prompt_len] = [-100] * prompt_len
+        # Also mask padding tokens
+        pad_id = tokenizer.pad_token_id
+        labels = [
+            -100 if (tok == pad_id and i >= prompt_len) else lbl
+            for i, (tok, lbl) in enumerate(zip(full_tokens["input_ids"], labels))
+        ]
+        full_tokens["labels"] = labels
+        return full_tokens
 
-    train_dataset = train_dataset.map(tokenize, remove_columns=["text"])
+    train_dataset = train_dataset.map(tokenize, remove_columns=["prompt_text", "full_text"])
 
     # ── Train ──────────────────────────────────────────────
     training_args = TrainingArguments(
@@ -152,7 +173,7 @@ def train_sft(
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation,
         learning_rate=lr,
-        fp16=True,
+        bf16=True,
         logging_steps=10,
         save_strategy="epoch",
         report_to="none",

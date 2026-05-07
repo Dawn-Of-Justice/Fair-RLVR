@@ -40,7 +40,7 @@ R_total = λ · R_fairness - P_structural
 
 ### Consequences
 - Max reward for λ=0.5: `0.5 × 1.0 = 0.5`
-- Reward range: `[-0.9, 0.5]` (three simultaneous violations → -0.9)
+- Reward range: `[-1.2, 0.5]` (four simultaneous violations → -1.2)
 - Paper is internally consistent: simplicity is a feature, not a limitation
 
 ---
@@ -88,7 +88,7 @@ GRPO (G=16) with DAPO asymmetric clipping (ε_low=0.20, ε_high=0.28) and LoRA (
 |---|---|---|
 | Clip-Higher (asymmetric ε) | ✅ | ε_low=0.20, ε_high=0.28 |
 | Token-level policy loss | ✅ | GRPOConfig default |
-| Dynamic Sampling (skip all-same-reward batches) | ✅ | GRPOConfig default |
+| Dynamic Sampling (skip all-same-reward batches) | ❌ | Not implemented — asymmetric clipping handles entropy collapse |
 | Entropy regularization bonus | ❌ | Not needed — dynamic sampling handles it |
 
 ### LoRA Target Modules (all attention + MLP projections)

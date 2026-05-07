@@ -88,10 +88,11 @@ def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
     """
     P_structural: Rule-based structural violation penalty.
 
-    Checks three violations (each incurs a 0.3 penalty):
+    Checks four violations (each incurs a 0.3 penalty, max 1.2):
     1. Empty or trivially short reasoning (< min_think_tokens tokens)
-    2. Answer leaking into <think> block (answer text found in reasoning)
-    3. Reasoning content outside designated tags
+    2. Missing <answer> tag entirely
+    3. Answer leaking into <think> block (answer text found in reasoning)
+    4. Reasoning content outside designated tags
 
     Based on: Tarek et al. (2025) composite reward approach.
     """
@@ -99,11 +100,15 @@ def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
     answer = extract_answer(text)
     penalty = 0.0
 
-    # 1. Empty or trivially short reasoning
+    # 1. Empty or trivially short reasoning (also fires if <think> is missing)
     if think is None or len(think.split()) < min_think_tokens:
         penalty += 0.3
 
-    # 2. Answer leak: answer text appears inside think block
+    # 2. Missing <answer> tag — model wrote reasoning but no extractable answer
+    if answer is None:
+        penalty += 0.3
+
+    # 3. Answer leak: answer text appears inside think block
     if think and answer:
         answer_lower = answer.lower()
         think_lower = think.lower()
@@ -117,7 +122,7 @@ def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
         if any(p in think_lower for p in leak_patterns):
             penalty += 0.3
 
-    # 3. Content outside designated tags
+    # 4. Content outside designated tags
     outside = _get_outside_content(text)
     if len(outside) > 10:
         penalty += 0.3
@@ -277,7 +282,7 @@ if __name__ == "__main__":
     # Reward range summary
     print("\n" + "=" * 40)
     print("REWARD RANGE (λ=0.5):")
-    print(f"  Max (correct + clean):       {0.5 * 1.0 - 0.0:.2f}")
-    print(f"  Correct + one violation:     {0.5 * 1.0 - 0.3:.2f}")
-    print(f"  Wrong + clean:               {0.5 * 0.0 - 0.0:.2f}")
-    print(f"  Wrong + all violations:      {0.5 * 0.0 - 0.9:.2f}")
+    print(f"  Max (correct + clean):        {0.5 * 1.0 - 0.0:.2f}")
+    print(f"  Correct + one violation:      {0.5 * 1.0 - 0.3:.2f}")
+    print(f"  Wrong + clean:                {0.5 * 0.0 - 0.0:.2f}")
+    print(f"  Wrong + all 4 violations:     {0.5 * 0.0 - 1.2:.2f}")
