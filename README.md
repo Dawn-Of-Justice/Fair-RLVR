@@ -109,20 +109,23 @@ python -m src.baselines.baseline_model --seed 42
 python -m src.baselines.sft --seed 42
 python -m src.baselines.grpo_no_fairness --seed 42
 
-# Step 5: Main training (Fair-RLVR λ=0.5, 3,500 steps)
-python -m src.train --config configs/fair_rlvr.yaml
+# Step 5: Lambda sweep — includes λ=0.5 which serves as the main experiment.
+# No separate fair_rlvr.yaml run needed; results/lambda_0.5 IS the main result.
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.1 --output-dir results/lambda_0.1
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.3 --output-dir results/lambda_0.3
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.5 --output-dir results/lambda_0.5
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.7 --output-dir results/lambda_0.7
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 1.0 --output-dir results/lambda_1.0
 
-# Step 6: Lambda sweep
-python -m src.train --lambda-fair 0.1 --output-dir results/lambda_0.1
-python -m src.train --lambda-fair 0.3 --output-dir results/lambda_0.3
-python -m src.train --lambda-fair 0.7 --output-dir results/lambda_0.7
-python -m src.train --lambda-fair 1.0 --output-dir results/lambda_1.0
+# Step 6: Evaluate each checkpoint (full eval set, ~5,849 samples)
+python -m src.evaluate --checkpoint results/lambda_0.1/final_adapter --output-dir results/eval_lambda_0.1
+python -m src.evaluate --checkpoint results/lambda_0.3/final_adapter --output-dir results/eval_lambda_0.3
+python -m src.evaluate --checkpoint results/lambda_0.5/final_adapter --output-dir results/eval_lambda_0.5
+python -m src.evaluate --checkpoint results/lambda_0.7/final_adapter --output-dir results/eval_lambda_0.7
+python -m src.evaluate --checkpoint results/lambda_1.0/final_adapter --output-dir results/eval_lambda_1.0
 
-# Step 7: Evaluate (full eval set, ~5,849 samples)
-python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter
-
-# Step 8: Interventional sensitivity test (Experiment 4)
-python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter --run-faithfulness
+# Step 7: Interventional sensitivity test on main model (Experiment 4)
+python -m src.evaluate --checkpoint results/lambda_0.5/final_adapter --run-faithfulness
 ```
 
 ## Experiments

@@ -139,7 +139,7 @@ def train(
     lambda_fair: float = 0.5,
     learning_rate: float = 1e-5,
     num_train_steps: int = 3500,
-    group_size: int = 16,
+    group_size: int = 8,
     batch_size: int = 8,
     gradient_accumulation: int = 2,
     max_new_tokens: int = 512,
@@ -391,6 +391,8 @@ if __name__ == "__main__":
     parser.add_argument("--group-size", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--grad-accum", type=int, default=None)
+    parser.add_argument("--max-new-tokens", type=int, default=None)
+    parser.add_argument("--max-prompt-length", type=int, default=None)
     parser.add_argument("--kl-coeff", type=float, default=None)
 
     # LoRA
@@ -428,9 +430,11 @@ if __name__ == "__main__":
         "lambda_fair": _resolve(args.lambda_fair, "lambda_fair", 0.5),
         "learning_rate": _resolve(args.lr, "learning_rate", 1e-5),
         "num_train_steps": _resolve(args.steps, "num_train_steps", 3500),
-        "group_size": _resolve(args.group_size, "group_size", 16),
+        "group_size": _resolve(args.group_size, "group_size", 8),
         "batch_size": _resolve(args.batch_size, "batch_size", 8),
         "gradient_accumulation": _resolve(args.grad_accum, "gradient_accumulation", 2),
+        "max_new_tokens": _resolve(args.max_new_tokens, "max_new_tokens", 256),
+        "max_prompt_length": _resolve(args.max_prompt_length, "max_prompt_length", 512),
         "lora_r": _resolve(args.lora_r, "lora_r", 16),
         "lora_alpha": _resolve(args.lora_alpha, "lora_alpha", 32),
         "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),

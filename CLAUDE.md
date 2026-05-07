@@ -22,22 +22,24 @@ pip install -r requirements.txt
 # Dry run (5 steps, verifies pipeline works end-to-end)
 python -m src.train --dry-run
 
-# Train with a config file
-python -m src.train --config configs/fair_rlvr.yaml
-
-# Train with CLI overrides (lambda sweep example)
-python -m src.train --lambda-fair 0.1 --output-dir results/lambda_0.1
-
 # Run baselines
-python -m src.baselines.baseline_model      # zero-shot
-python -m src.baselines.sft                 # supervised fine-tune
-python -m src.baselines.grpo_no_fairness    # GRPO λ=0 ablation
+python -m src.baselines.baseline_model --seed 42   # zero-shot
+python -m src.baselines.sft --seed 42              # supervised fine-tune
+python -m src.baselines.grpo_no_fairness --seed 42 # GRPO λ=0 ablation
 
-# Evaluate a trained adapter (defaults to full eval set ~5,849 samples)
-python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter
+# Lambda sweep — λ=0.5 run doubles as the main experiment (no separate fair_rlvr.yaml needed)
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.1 --output-dir results/lambda_0.1
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.3 --output-dir results/lambda_0.3
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.5 --output-dir results/lambda_0.5
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.7 --output-dir results/lambda_0.7
+python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 1.0 --output-dir results/lambda_1.0
 
-# Evaluate with interventional sensitivity test (Experiment 4)
-python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter --run-faithfulness
+# Evaluate each lambda checkpoint
+python -m src.evaluate --checkpoint results/lambda_0.5/final_adapter  # main result
+python -m src.evaluate --checkpoint results/lambda_0.1/final_adapter --output-dir results/eval_lambda_0.1
+
+# Interventional sensitivity test on main model (Experiment 4)
+python -m src.evaluate --checkpoint results/lambda_0.5/final_adapter --run-faithfulness
 
 # Test reward function directly
 python -m src.reward
@@ -96,7 +98,7 @@ python -m src.data
 - **Lambda (`λ`)**: Controls fairness signal strength. Even `λ=0.1` achieves debiasing. Default is 0.5. Max reward at λ=0.5 is `0.5 × 1.0 = 0.5`; reward range is `[−1.2, 0.5]` (four simultaneous violations → −1.2).
 - **Training uses 4-bit quantization** (`bitsandbytes` nf4); evaluation loads in float16 without quantization.
 - **LoRA targets**: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` (all attention + MLP projections). All baselines use the same targets for equal parameter counts.
-- **Group size G=16**: Double the GRPO default — more diverse per-prompt samples for better advantage estimation.
+- **Group size G=8**: Standard GRPO default. For 3-choice MCQA, reward variance comes from answer correctness (3 possible outcomes), not reasoning diversity — larger G yields diminishing returns and doubles generation cost.
 - **Template-family-aware split**: A naive `train_test_split` stratified only by category puts near-duplicate question variants across splits, inflating eval scores. `create_splits()` groups by `(category, question_index)` to prevent this.
 - **`unknown_label` field**: The "Unknown" answer is not always option (c). Always use the per-question `unknown_label` index for abstention detection.
 - **Seed consistency**: All scripts (train, eval, all baselines) must use `--seed 42` (the default). Mismatched seeds produce different train/eval splits → data leakage.
@@ -120,7 +122,7 @@ The λ=0 baseline is the critical ablation: if it approaches Fair-RLVR's bias sc
 | Model | `Qwen/Qwen2.5-3B-Instruct` |
 | Quantization | 4-bit bitsandbytes nf4 (training); float16 (eval) |
 | LoRA r / α | 16 / 32 |
-| Group size G | 16 |
+| Group size G | 8 |
 | Batch size | 8 per device (grad_accum=2 → effective batch=16) |
 | Max new tokens | 512 |
 | Learning rate | 1e-5 |

@@ -17,9 +17,11 @@ lambda_fair: 0.5
 # Training — identical to main experiment for fair comparison
 learning_rate: 1.0e-5
 num_train_steps: 3500
-group_size: 16
+group_size: 8
 batch_size: 8
 gradient_accumulation: 2
+max_new_tokens: 256
+max_prompt_length: 512
 kl_coeff: 0.01
 
 # LoRA
