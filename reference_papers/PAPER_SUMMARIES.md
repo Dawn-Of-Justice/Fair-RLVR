@@ -105,7 +105,11 @@ BBQ (Bias Benchmark for QA) is the dataset used as the fairness verifier in Fair
 
 ### Key Contributions
 
-- Defines a clear, objective bias metric: the proportion of errors in the ambiguous condition that are stereotype-consistent (bias score). A bias score of 0.5 means random errors; above 0.5 means systematically biased toward stereotypes.
+- Defines a two-step official bias metric (implemented in `BBQ_calculate_bias_score.R`):
+  1. Filter out "Unknown" predictions, then compute `raw = 2 × P(target | non-Unknown) − 1`
+  2. Scale ambiguous score by accuracy: `bias = raw × (1 − accuracy_ambig)` — so a model that correctly abstains on ambiguous questions gets a near-zero bias score rather than appearing counter-stereotyped
+  Disambiguated score is unscaled. Range [−1, 1]; 0 = unbiased; positive = stereotype-biased.
+  Note: The paper also mentions a simplified metric (proportion of *errors* that are stereotype-consistent, range [0, 1], 0.5 = random errors) — this is secondary and not the formula in the R script.
 - Separates two failure modes: (1) relying on stereotypes when context is ambiguous, and (2) letting stereotypes override correct evidence when context is disambiguated.
 - Finds that all tested models rely heavily on stereotypes in ambiguous contexts, and even in disambiguated contexts, models are 3–5 percentage points more accurate when the correct answer aligns with stereotypes.
 - Provides a reproducible, automated evaluation framework — no human raters needed post-construction.
