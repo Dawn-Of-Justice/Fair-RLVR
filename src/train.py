@@ -129,8 +129,8 @@ def build_grpo_dataset(split_data, tokenizer) -> tuple[Dataset, dict]:
             "context_condition": example["context_condition"],
             "unknown_label": example.get("unknown_label", -1),
             # target_label = BBQ stereotype-aligned answer index (or -1 if absent).
-            # Required by P_stereotype in compute_reward(). The Elfsong/BBQ HF
-            # dataset includes this column natively; .map() preserves it.
+            # Kept for API compatibility with compute_reward(); not used in reward formula.
+            # The Elfsong/BBQ HF dataset includes this column natively; .map() preserves it.
             "target_label": example.get("target_label", -1) if example.get("target_label") is not None else -1,
         })
 
@@ -342,10 +342,10 @@ def train(
     # ── Train ─────────────────────────────────────────────
     print("\n" + "=" * 50)
     print(f"Starting Fair-RLVR Training")
-    print(f"  Reward: R_total = R_binary - P_structural - λ_fair · P_stereotype")
+    print(f"  Reward: R_total = λ · R_fairness - P_structural")
     print(f"  Model: {model_name}")
     print(f"  Steps: {num_train_steps}")
-    print(f"  λ_fair (stereotype penalty weight): {lambda_fair}")
+    print(f"  λ (fairness reward weight): {lambda_fair}")
     print(f"  Group size: {group_size}")
     print(f"  4-bit: {use_4bit}")
     print("=" * 50 + "\n")

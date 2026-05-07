@@ -156,18 +156,16 @@ class FairRLVRCallback(TrainerCallback):
             context_conditions: list of "ambig" or "disambig" (optional)
             unknown_labels: list of unknown option indices (0/1/2) (optional)
             target_labels: list of BBQ stereotype-aligned answer indices (optional);
-                required for P_stereotype to be reflected in r_total
+                accepted for API compatibility, not used in R_total
             lambda_fair: fairness reward weight — must match the training lambda
                 so batch_logs reflect the actual reward values, not a default
         """
         batch_stats = {
-            # New ternary correctness/format reward (-1, 0, +1)
-            "r_binary": [],
+            # Binary fairness reward (0.0 or +1.0)
+            "r_fairness": [],
             # Structural penalty (0.0 to 1.2)
             "p_structural": [],
-            # Raw stereotype penalty (0.0 or 0.5), pre-weighting
-            "p_stereotype": [],
-            # Total reward = r_binary - p_structural - lambda_fair * p_stereotype
+            # Total reward = lambda_fair * r_fairness - p_structural
             "r_total": [],
             # Aggregate counts
             "abstained": 0,
@@ -191,9 +189,8 @@ class FairRLVRCallback(TrainerCallback):
                 target_label=tgt,
                 lambda_fair=lambda_fair,
             )
-            batch_stats["r_binary"].append(result["r_binary"])
+            batch_stats["r_fairness"].append(result["r_fairness"])
             batch_stats["p_structural"].append(result["p_structural"])
-            batch_stats["p_stereotype"].append(result["p_stereotype"])
             batch_stats["r_total"].append(result["r_total"])
             batch_stats["total"] += 1
 
@@ -238,9 +235,8 @@ class FairRLVRCallback(TrainerCallback):
                         cond == "ambig" and tgt is not None
                         and tgt >= 0 and pred_idx == tgt
                     ),
-                    "r_binary": result["r_binary"],
+                    "r_fairness": result["r_fairness"],
                     "p_structural": result["p_structural"],
-                    "p_stereotype": result["p_stereotype"],
                     "reward": result["r_total"],
                 })
 
@@ -255,14 +251,13 @@ class FairRLVRCallback(TrainerCallback):
             "step": step,
             "lambda_fair": lambda_fair,
             "avg_r_total": _avg("r_total"),
-            "avg_r_binary": _avg("r_binary"),
+            "avg_r_fairness": _avg("r_fairness"),
             "avg_p_structural": _avg("p_structural"),
-            "avg_p_stereotype": _avg("p_stereotype"),
             "accuracy": batch_stats["correct"] / n if n > 0 else 0.0,
             "format_failure_rate": batch_stats["format_failures"] / n if n > 0 else 0.0,
             "abstention_rate": batch_stats["abstained"] / n if n > 0 else 0.0,
-            # Stereotype rate is conditioned on ambig only — that's the slice
-            # P_stereotype actually fires on. NaN-safe: 0.0 when no ambig in batch.
+            # Stereotype rate is conditioned on ambig only — diagnostic metric.
+            # NaN-safe: 0.0 when no ambig in batch.
             "stereotype_pick_rate_ambig": (
                 batch_stats["stereotype_picks_ambig"] / n_ambig if n_ambig > 0 else 0.0
             ),
