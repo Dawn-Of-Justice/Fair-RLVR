@@ -104,7 +104,7 @@ We formulate fairness as a verifiable reasoning task. Given an input prompt $x$ 
 
 We use the BBQ benchmark as a deterministic fairness verifier. In ambiguous contexts, where insufficient information is provided, the correct answer is always ``Unknown.'' Any stereotype-aligned answer receives zero reward. In disambiguated contexts, the correct answer is determined by explicit evidence in the prompt. This binary verification replaces subjective human judgment with an automated, reproducible signal.
 
-For training, we primarily use ambiguous-context questions, which test whether the model spontaneously avoids stereotyping when evidence is lacking. Disambiguated questions are included in evaluation to test whether the model correctly follows evidence when it is available.
+For training, we use both ambiguous-context and disambiguated questions from the full BBQ dataset. Ambiguous questions test whether the model avoids stereotyping when evidence is lacking; disambiguated questions test whether the model correctly follows evidence when it is available.
 
 \subsection{Composite Reward Function}
 
@@ -120,7 +120,7 @@ R_{\text{total}} = \lambda \cdot R_{\text{fairness}} - P_{\text{structural}}
 \begin{itemize}
     \item $R_{\text{fairness}}$ compares the model's answer against the BBQ ground-truth label: $+1$ for a match, $0$ for a mismatch.
     \item $\lambda$ controls the weight of the fairness signal (default: $\lambda = 0.5$), giving a maximum possible reward of $\lambda \cdot 1.0 = 0.5$.
-    \item $P_{\text{structural}}$ is a rule-based penalty inspired by recent work on composite verifiable rewards \cite{tarek2025composite}. It detects three structural violations: (1) the answer appearing inside the \texttt{<think>} block (answer leaking), (2) an empty or trivially short reasoning chain ($<20$ tokens), and (3) reasoning content appearing outside the designated tags. Each violation incurs a fixed penalty of $0.3$.
+    \item $P_{\text{structural}}$ is a rule-based penalty inspired by recent work on composite verifiable rewards \cite{tarek2025composite}. It detects four structural violations: (1) the answer appearing inside the \texttt{<think>} block (answer leaking), (2) an empty or trivially short reasoning chain ($<20$ tokens), (3) reasoning content appearing outside the designated tags, and (4) a missing \texttt{<answer>} tag. Each violation incurs a fixed penalty of $0.3$, for a maximum total penalty of $1.2$.
 \end{itemize}
 
 A separate semantic leakage penalty based on Sentence-BERT cosine similarity between the \texttt{<think>} and \texttt{<answer>} blocks was considered but omitted: since the model outputs single-letter multiple-choice answers (\texttt{(a)/(b)/(c)}), the cosine similarity between a full reasoning chain and a one-token answer never approaches the detection threshold ($\tau = 0.85$). Similarly, a separate $R_{\text{correctness}}$ format-compliance term was removed because format violations are already captured by $P_{\text{structural}}$, and within GRPO's group-normalized advantage framework, the correctness signal reduces to zero once the model reliably generates valid tag structure. $P_{\text{structural}}$ is fully automated, reproducible, and does not penalize legitimate fairness-related reasoning language.
@@ -134,7 +134,7 @@ A_i = \frac{R_i - \mu(R)}{\sigma(R)}
 \label{eq:advantage}
 \end{equation}
 
-\noindent where $\mu(R)$ and $\sigma(R)$ are the mean and standard deviation of rewards within the group. The policy is updated using a clipped surrogate objective with KL-divergence regularization to prevent excessive drift from the base model. Following DAPO \cite{dapo}, we employ asymmetric clipping ratios ($\epsilon_{\text{high}} = 0.28$, $\epsilon_{\text{low}} = 0.20$) to maintain exploration and prevent entropy collapse. Prompts where all $G$ outputs receive identical rewards are filtered out via dynamic sampling, as they provide no gradient signal.
+\noindent where $\mu(R)$ and $\sigma(R)$ are the mean and standard deviation of rewards within the group. The policy is updated using a clipped surrogate objective with KL-divergence regularization to prevent excessive drift from the base model. Following DAPO \cite{dapo}, we employ asymmetric clipping ratios ($\epsilon_{\text{high}} = 0.28$, $\epsilon_{\text{low}} = 0.20$) to maintain exploration and prevent entropy collapse.
 
 \subsection{Training Setup}
 
@@ -209,19 +209,17 @@ Table~\ref{tab:main} presents results across all four conditions evaluated on 50
 \toprule
 \textbf{Condition} & \textbf{BBQ-A} & \textbf{BBQ-D} & \textbf{Bias Score} \\
 \midrule
-Zero-shot & 0.824 & 0.898 & 0.561 \\
-SFT & 0.894 & 0.876 & 0.358 \\
-GRPO ($\lambda=0$) & 0.872 & 0.866 & 0.489 \\
-\textbf{Fair-RLVR (ours)} & \textbf{0.958} & \textbf{0.886} & \textbf{0.269} \\
+Zero-shot & --- & --- & --- \\
+SFT & --- & --- & --- \\
+GRPO ($\lambda=0$) & --- & --- & --- \\
+\textbf{Fair-RLVR (ours)} & --- & --- & --- \\
 \bottomrule
 \end{tabular}
 \label{tab:main}
 \end{center}
 \end{table}
 
-Fair-RLVR achieves the highest accuracy on ambiguous questions (95.8\%), surpassing the zero-shot baseline by 13.4 percentage points and SFT by 6.4 points. The bias score drops from 0.561 (zero-shot) to 0.269, a 52\% reduction. Notably, disambiguated accuracy remains competitive at 88.6\%, confirming that fairness training does not degrade evidence-following ability.
-
-The GRPO $\lambda=0$ baseline provides a critical ablation: training with GRPO alone yields only modest improvements over zero-shot (bias score 0.489 vs.\ 0.561), demonstrating that the fairness reward signal---not the optimization algorithm---drives the de-biasing effect.
+% Results pending GPU training. Narrative will be filled in after Experiments 1--6 complete.
 
 \subsection{Per-Category Analysis}
 
@@ -234,20 +232,20 @@ Table~\ref{tab:percategory} presents bias scores broken down by BBQ social categ
 \toprule
 \textbf{Category} & \textbf{Zero-shot} & \textbf{Fair-RLVR} \\
 \midrule
-Age & 0.727 & 0.316 \\
-SES & 0.655 & 0.500 \\
-Nationality & 0.556 & 0.111 \\
-Disability & 0.500 & 0.500 \\
-Physical Appearance & 0.571 & 0.400 \\
-Race/Ethnicity & 0.476 & 0.231 \\
-Gender Identity & 0.304 & \textbf{0.000} \\
+Age & --- & --- \\
+SES & --- & --- \\
+Nationality & --- & --- \\
+Disability & --- & --- \\
+Physical Appearance & --- & --- \\
+Race/Ethnicity & --- & --- \\
+Gender Identity & --- & --- \\
 \bottomrule
 \end{tabular}
 \label{tab:percategory}
 \end{center}
 \end{table}
 
-The most striking result is gender identity, where Fair-RLVR achieves a bias score of 0.000---zero stereotype-consistent errors across all 14 incorrect predictions. Age bias sees the largest absolute improvement, dropping from 0.727 to 0.316. These results suggest that the model learned a general principle of insufficient-evidence detection rather than category-specific heuristics.
+% Per-category narrative pending GPU training results.
 
 \subsection{Lambda Ablation}
 
@@ -260,18 +258,18 @@ Table~\ref{tab:lambda} presents the effect of varying the fairness weight $\lamb
 \toprule
 \textbf{$\lambda$} & \textbf{BBQ-A} & \textbf{BBQ-D} & \textbf{Bias Score} \\
 \midrule
-0.1 & 0.982 & 0.878 & \textbf{0.129} \\
-0.3 & 0.968 & 0.880 & 0.224 \\
-0.5 & 0.958 & 0.886 & 0.269 \\
-0.7 & 0.972 & \textbf{0.910} & 0.305 \\
-1.0 & 0.976 & 0.870 & 0.169 \\
+0.1 & --- & --- & --- \\
+0.3 & --- & --- & --- \\
+0.5 & --- & --- & --- \\
+0.7 & --- & --- & --- \\
+1.0 & --- & --- & --- \\
 \bottomrule
 \end{tabular}
 \label{tab:lambda}
 \end{center}
 \end{table}
 
-Contrary to our expectation that high $\lambda$ values would cause over-refusal, all settings achieve strong fairness performance with 0\% abstention rate. The lowest bias score (0.129) occurs at $\lambda = 0.1$, suggesting that even a weak fairness signal is sufficient to drive de-biasing when combined with GRPO. The highest disambiguated accuracy (91.0\%) occurs at $\lambda = 0.7$, indicating that stronger fairness signals can actually improve evidence-following ability. These results differ from FairReason's finding of a narrow optimal range, suggesting that RLVR-based fairness training is more robust to hyperparameter choices than SFT-based approaches.
+% Lambda ablation narrative pending GPU training results.
 
 \subsection{Alignment Tax}
 
@@ -284,15 +282,15 @@ To verify that fairness training does not degrade general capabilities, we evalu
 \toprule
 \textbf{Condition} & \textbf{MMLU} & \textbf{GSM8K} \\
 \midrule
-Zero-shot & 0.622 & 0.836 \\
-Fair-RLVR ($\lambda=0.5$) & \textbf{0.628} & \textbf{0.850} \\
+Zero-shot & --- & --- \\
+Fair-RLVR ($\lambda=0.5$) & --- & --- \\
 \bottomrule
 \end{tabular}
 \label{tab:benchmarks}
 \end{center}
 \end{table}
 
-Fair-RLVR shows no alignment tax. MMLU accuracy increases slightly from 62.2\% to 62.8\% (+0.6\%), and GSM8K accuracy improves from 83.6\% to 85.0\% (+1.4\%). These results are consistent with the hypothesis that learning to detect insufficient evidence and reject unsupported assumptions is a general reasoning skill that transfers beyond fairness tasks.
+% Alignment tax narrative pending GPU training results.
 
 \subsection{Training Dynamics}
 

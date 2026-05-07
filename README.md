@@ -15,10 +15,10 @@ R_total = λ · R_fairness - P_structural
 | Component | What it does |
 |---|---|
 | `R_fairness` | Rewards matching BBQ ground-truth label (+1.0 / 0) |
-| `P_structural` | Penalizes format violations: answer leaked in `<think>`, reasoning < 20 tokens, content outside tags (0.3 each, max 0.9) |
+| `P_structural` | Penalizes format violations: answer leaked in `<think>`, reasoning < 20 tokens, content outside tags, missing `<answer>` tag (0.3 each, max 1.2) |
 | `λ` | Fairness signal weight — default 0.5, ablated across {0.1, 0.3, 0.5, 0.7, 1.0} |
 
-Reward range: `[−0.9, 0.5]` at λ=0.5. `R_correctness` and `P_leak` (Sentence-BERT) were removed from an earlier 4-component design — both were found to be redundant for single-letter MCQA (see [docs/adr_fair_rlvr.md](docs/adr_fair_rlvr.md)).
+Reward range: `[−1.2, 0.5]` at λ=0.5. `R_correctness` and `P_leak` (Sentence-BERT) were removed from an earlier 4-component design — both were found to be redundant for single-letter MCQA (see [docs/adr_fair_rlvr.md](docs/adr_fair_rlvr.md)).
 
 ## Why Not Just RLHF?
 
@@ -91,7 +91,11 @@ cd RLVR
 pip install -e .
 pip install -r requirements.txt
 
-# Step 1: Verify pipeline (5 steps, no GPU required)
+# flash-attn must be built against your installed CUDA/torch versions.
+# If the above fails for flash-attn, install it separately:
+pip install flash-attn --no-build-isolation
+
+# Step 1: Verify pipeline (5 steps — still loads the full model, GPU recommended)
 python -m src.train --dry-run
 
 # Step 2: Verify data split (should show ~52,643 train / ~5,849 eval)

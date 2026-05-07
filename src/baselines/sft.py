@@ -115,6 +115,7 @@ def train_sft(
         torch_dtype=torch.bfloat16,   # Match train.py (bfloat16, not float16)
         device_map=device,
         trust_remote_code=True,
+        attn_implementation="flash_attention_2",
     )
 
     # ── LoRA ───────────────────────────────────────────────
@@ -174,10 +175,13 @@ def train_sft(
         gradient_accumulation_steps=gradient_accumulation,
         learning_rate=lr,
         bf16=True,
+        optim="paged_adamw_8bit",
         logging_steps=10,
         save_strategy="epoch",
         report_to="none",
         remove_unused_columns=False,
+        dataloader_num_workers=4,
+        dataloader_pin_memory=True,
     )
 
     trainer = Trainer(

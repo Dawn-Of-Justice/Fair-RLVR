@@ -149,17 +149,19 @@ Both produce incorrect abstention rates. The `unknown_label` field is now set by
 
 ---
 
-## Decision 7: `log_generation_batch` — Manual Call Required
+## Decision 7: `log_generation_batch` — Wired into Reward Function
 
 ### Decision
-`FairRLVRCallback.log_generation_batch()` provides detailed per-batch metrics (CoT
-samples, per-condition abstention, phase classification). **It is not called automatically
-by GRPOTrainer** — TRL's callback interface does not expose completions to `on_step_end`.
+`FairRLVRCallback.log_generation_batch()` is called automatically from `make_reward_fn()`
+in `train.py`. The reward function is the only point in TRL's GRPOTrainer where raw
+completions are accessible — TRL's callback interface does not expose completions in
+`on_step_end`. The callback is injected into the reward function closure, and
+`callback.current_step` (updated in `on_step_end` to match `trainer.global_step`) is
+used to stamp batch log entries with the correct step number.
 
 Step-level reward mean/std (from `state.log_history`) is captured automatically via
-`on_step_end`. For detailed CoT analysis, run `evaluate.py --checkpoint <path>` at
-each checkpoint. The 6-phase classification in `TrainingDynamicsLogger.classify_phase()`
-can be applied to `predictions.json` outputs post-hoc.
+`on_step_end`. Per-batch CoT samples and phase classification are captured live during
+training via the reward function hook.
 
 ---
 

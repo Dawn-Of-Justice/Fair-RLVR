@@ -40,8 +40,6 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
         callback: optional FairRLVRCallback — if provided, log_generation_batch()
                   is called each step so phase tracking and CoT logs are populated
     """
-    step_counter = [0]  # mutable so the closure can increment it
-
     def reward_fn(completions, **kwargs):
         prompts = kwargs.get("prompts", [])
         categories = kwargs.get("category", [None] * len(completions))
@@ -66,9 +64,11 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
                 rewards.append(result["r_total"])
             labels.append(label)
 
-        # Wire into callback for live phase tracking and CoT logging
+        # Wire into callback for live phase tracking and CoT logging.
+        # Use callback.current_step (set in on_step_end) so the step number
+        # stays in sync with trainer.global_step rather than a separate counter.
         if callback is not None:
-            step_counter[0] += 1
+            step = callback.current_step
             valid = [(c, l, cat, cond, unk)
                      for c, l, cat, cond, unk
                      in zip(completions, labels, categories, context_conditions, unknown_labels)
@@ -76,12 +76,13 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
             if valid:
                 v_completions, v_labels, v_cats, v_conds, v_unks = zip(*valid)
                 callback.log_generation_batch(
-                    step=step_counter[0],
+                    step=step,
                     completions=list(v_completions),
                     ground_truth_labels=list(v_labels),
                     categories=list(v_cats),
                     context_conditions=list(v_conds),
                     unknown_labels=list(v_unks),
+                    lambda_fair=lambda_fair,
                 )
 
         return rewards
@@ -229,6 +230,7 @@ def train(
     model_kwargs = {
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16,
+        "attn_implementation": "flash_attention_2",
     }
 
     if use_4bit:
@@ -289,7 +291,7 @@ def train(
         # KL and DAPO asymmetric clipping
         # epsilon      = low clip ratio  (standard lower bound)
         # epsilon_high = high clip ratio (DAPO "Clip-Higher" strategy)
-        # Requires TRL >= 0.11 with DAPO support.
+        # Requires TRL >= 0.16 (epsilon_high added in 0.16.0).
         beta=kl_coeff,
         epsilon=clip_ratio_low,
         epsilon_high=clip_ratio_high,
@@ -307,13 +309,20 @@ def train(
         remove_unused_columns=False,
         # Gradient checkpointing for memory efficiency
         gradient_checkpointing=True,
+        # Optimizer: paged_adamw_8bit stores optimizer states in 8-bit and
+        # pages them to CPU when VRAM is tight — a good match for 4-bit weights.
+        optim="paged_adamw_8bit",
+        # Overlap data loading with GPU compute on cloud instances (0 = serial).
+        dataloader_num_workers=4,
+        dataloader_pin_memory=True,
+        # model_init_kwargs belongs on GRPOConfig (not GRPOTrainer) per TRL >= 0.16
+        model_init_kwargs=model_kwargs,
     )
 
     # ── Initialize trainer ────────────────────────────────
     print("\nInitializing GRPOTrainer...")
     trainer = GRPOTrainer(
         model=model_name,
-        model_init_kwargs=model_kwargs,
         args=training_config,
         train_dataset=train_dataset,
         reward_funcs=reward_fn,

@@ -130,11 +130,12 @@ def eval_mmlu(model, tokenizer, n_samples=500, seed=42):
         formatted = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         output = generate(model, tokenizer, formatted, max_new_tokens=16)
 
-        # Extract answer letter
+        # Extract answer letter.
+        # Use word-boundary match to avoid "ANSWER: B".startswith("A") = True.
         predicted = None
         output_clean = output.strip().upper()
         for c in choices:
-            if output_clean.startswith(c) or f"({c})" in output_clean or f" {c}." in output_clean or f" {c} " in output_clean:
+            if re.match(rf"^{c}\b", output_clean) or f"({c})" in output_clean or f" {c}." in output_clean or f" {c} " in output_clean:
                 predicted = c
                 break
         # Fallback: first letter that's A-D

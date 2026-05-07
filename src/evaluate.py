@@ -533,6 +533,7 @@ def run_evaluation(
         torch_dtype=torch.float16,
         device_map=device,
         trust_remote_code=True,
+        attn_implementation="flash_attention_2",
     )
 
     print(f"Loading adapter from: {checkpoint}")

@@ -59,8 +59,13 @@ class FairRLVRCallback(TrainerCallback):
         self.batch_logs = []
         self.cot_samples = {}
 
+        # Synced to trainer.global_step in on_step_end; read by make_reward_fn
+        # to stamp batch_logs with the correct step rather than a separate counter.
+        self.current_step = 0
+
     def on_step_end(self, args, state, control, **kwargs):
         """Log metrics at the end of each training step."""
+        self.current_step = state.global_step
         # TRL's GRPOTrainer logs reward stats in state.log_history
         if state.log_history:
             latest = state.log_history[-1]
@@ -119,6 +124,7 @@ class FairRLVRCallback(TrainerCallback):
         categories: list[str] = None,
         context_conditions: list[str] = None,
         unknown_labels: list[int] = None,
+        lambda_fair: float = 0.5,
     ):
         """
         Log detailed reward breakdown and CoT samples for a batch.
@@ -127,12 +133,14 @@ class FairRLVRCallback(TrainerCallback):
         function is the only point where GRPOTrainer exposes raw completions.
 
         Args:
-            step: current training step
+            step: current training step (synced to trainer.global_step)
             completions: list of model output strings
             ground_truth_labels: list of BBQ ground truth labels
             categories: list of BBQ categories (optional)
             context_conditions: list of "ambig" or "disambig" (optional)
             unknown_labels: list of unknown option indices (0/1/2) from get_unknown_label() (optional)
+            lambda_fair: fairness reward weight — must match the training lambda so
+                batch_logs reflect the actual reward values, not the default 0.5
         """
         batch_stats = {
             "r_fairness": [],
@@ -147,7 +155,7 @@ class FairRLVRCallback(TrainerCallback):
         cot_examples = []
 
         for i, (completion, label) in enumerate(zip(completions, ground_truth_labels)):
-            result = compute_reward(completion, label)
+            result = compute_reward(completion, label, lambda_fair=lambda_fair)
             batch_stats["r_fairness"].append(result["r_fairness"])
             batch_stats["p_structural"].append(result["p_structural"])
             batch_stats["r_total"].append(result["r_total"])
