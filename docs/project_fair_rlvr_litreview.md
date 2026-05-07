@@ -1,6 +1,6 @@
 ---
 name: Fair-RLVR Literature Review
-description: 12 papers forming the literature review for the Fair-RLVR IEEE paper
+description: 14 papers forming the literature review for the Fair-RLVR IEEE paper
 type: project
 ---
 
@@ -35,6 +35,10 @@ type: project
 11. **MCSQ Framework** — Dataset quality: Volume, Scope, Granularity, Variety, Distortion, Mismatch. Structure > size. Performance peaks ~10K samples. Distorted (model-disagreed) samples can help. *Dataset selection guidance.*
 
 12. **VMR-RLVR** [2511.02463] — Extends RLVR to open-ended tasks via multiple-choice reformulation. +3.29pts over reward-model RL. Training collapse risk (response length). *Shows RLVR can work beyond math/code.*
+
+13. **Med-RLVR** [2502.19655] — First application of RLVR to medical MCQA using Qwen2.5-3B. Reasoning emerges without CoT supervision. +8pts OOD improvement over SFT. Documents 6 training phases (Format Failure → Reintegrated Reasoning). *Direct precedent: same base model, same approach, medical domain. Source of 6-phase taxonomy in Fair-RLVR callbacks.*
+
+14. **Reward Hacking Mitigation via Composite Rewards** (Tarek et al., 2025) — Extends Med-RLVR with two reward-hacking penalties: P_answer (answer revealed without reasoning) and P_structural (format violations). Reduces hacking ~85% in medical QA. *Direct inspiration for Fair-RLVR's P_structural penalty.*
 
 ## Key Gaps This Paper Fills
 - FairReason is closest but: multimodal, no explicit causal bottleneck analysis, no faithfulness metric

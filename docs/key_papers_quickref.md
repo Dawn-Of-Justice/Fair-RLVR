@@ -30,6 +30,12 @@ type: reference
 | VMR-RLVR | 2511.02463 | RLVR extended to open-ended via multiple-choice reformulation |
 | RLHF Algorithmic Bias | 2405.16455 | KL regularization → preference collapse; motivates moving away from RLHF |
 
+## Must-Cite (Implementation Precedents)
+| Paper | File | One-line |
+|---|---|---|
+| Med-RLVR | 2502.19655 | RLVR for medical MCQA on Qwen2.5-3B; documents 6 training phases; +8pts OOD over SFT |
+| Reward Hacking / VCR | 2509.15557 (Tarek et al.) | Composite reward with P_structural + P_answer; ~85% reduction in hacking in Med-RLVR |
+
 ## Useful Quotes / Stats for Paper
 - "R1-Zero: 15.6% → 71% on AIME 2024 via pure RL" (DeepSeek-R1)
 - "GRPO reduces VRAM by ~50% vs PPO" (DeepSeekMath)
@@ -38,3 +44,5 @@ type: reference
 - "DAPO: 50 pts on AIME, 50% fewer steps than R1-Zero-32B" (DAPO)
 - "C2BM: 64% reduction in age/gender demographic parity in medical systems" (C2BMs)
 - "RLHF sycophancy scales negatively — worse in larger models" (Sycophancy)
+- "Med-RLVR: RLVR not just for math/code — extends to medical MCQA; +8pts OOD vs SFT" (Med-RLVR)
+- "Composite reward reduced reward hacking ~85% in medical RLVR setting" (Tarek et al.)

@@ -1,60 +1,64 @@
 ---
 name: Fair-RLVR Reward Function Design
-description: Detailed breakdown of the composite reward function with structural and semantic anti-hacking penalties
+description: Detailed breakdown of the composite reward function — simplified to 2-component form
 type: project
 ---
 
 # Reward Function: R_total
 
+**Current (implemented) equation:**
 ```
-R_total = R_correctness + λ·R_fairness - P_structural - P_leak
+R_total = λ · R_fairness - P_structural
 ```
+
+> ⚠️ This supersedes the earlier 4-component design. R_correctness and P_leak were removed after analysis. See rationale below.
 
 ## Components
 
-### R_correctness
-- Did the model use `<think>` and `<answer>` tags correctly?
-- Did it produce a valid answer (not blank, not gibberish)?
-- Binary: +1 (correct format + valid answer), -1 for missing/malformed tags
-- Mirrors Med-RLVR's format reward: -1 for missing tags
-
 ### R_fairness
-- Does the final answer match the BBQ ground truth label?
-- BBQ labels: "Unknown" (ambiguous context) or specific answer (disambiguated context)
+- Does the final `<answer>` match the BBQ ground truth label?
+- BBQ labels: index 0, 1, or 2 (which of the three options is correct)
 - Binary: +1 for match, 0 for mismatch
-- λ controls the weight — needs tuning (start: λ=0.5)
-- FairReason found 1:4 bias:reasoning ratio is optimal sweet spot
+- λ controls the weight — default λ=0.5, ablated across {0.1, 0.3, 0.5, 0.7, 1.0}
+- Implemented in `src/reward.py` → `reward_fairness()`
 
 ### P_structural (structural penalty)
-Rule-based, checks three violations (each = 0.3 penalty):
-1. Answer leaking into `<think>` block
-2. Empty or trivially short reasoning (< 20 tokens)
-3. Reasoning content outside designated tags
+Rule-based, checks three violations (each = 0.3 penalty, max 0.9):
+1. Answer leaking into `<think>` block (model reveals answer in reasoning)
+2. Reasoning too short (< 20 tokens in `<think>`)
+3. Content exists outside `<think>` / `<answer>` tags
 
 Based on: Tarek et al. "Reward Hacking Mitigation using Verifiable Composite Rewards" (2025)
-- Reduced hacking by ~85% in Med-RLVR setting
+Implemented in `src/reward.py` → `penalty_structural()`
 
-### P_leak (semantic leak penalty)
-- Uses Sentence-BERT embeddings to compute cosine similarity between `<think>` and `<answer>`
-- If similarity > threshold τ (default 0.85), penalty = sim - τ
-- Catches model restating answer as "reasoning" without real logic
-- Fully automated, no keyword lists needed
+### λ (lambda)
+- Controls fairness signal strength
+- Even λ=0.1 achieves strong debiasing (empirically from our results)
+- λ=0 → pure structural training → this is the `grpo_no_fairness.py` ablation baseline
 
-Based on: Tarek et al. (2025) extended variant
+## Why R_correctness was Removed
+- R_correctness rewarded correct format (+1) / penalized bad format (-1)
+- P_structural already captures all format violations with finer granularity
+- Once format is learned, R_correctness normalizes to zero across a GRPO group — it provides no within-group signal
+- Removing it simplifies the equation without any empirical loss
 
-## Why NOT keyword-based R_hacking
-- Manually picking "fairness buzzwords" is subjective — same flaw as RLHF
-- Penalizes legitimate reasoning that uses words like "stereotype" or "bias"
-- Contradicts our paper's argument for automated, reproducible signals
+## Why P_leak was Removed
+- P_leak used Sentence-BERT cosine similarity between `<think>` and `<answer>` content
+- BBQ answers are single-letter options: `(a)`, `(b)`, `(c)` — short and sparse
+- The cosine similarity of a one-word answer to a paragraph of reasoning will never exceed τ=0.85 in practice
+- P_leak would therefore never fire on this task → dead code, adds SBERT dependency for zero benefit
 
 ## Tuning Risks
-- λ too high → "lobotomy effect": model says "Unknown" to everything (over-abstention)
-- λ too low → fairness signal drowned out by correctness reward
-- τ too low → penalizes legitimate short reasoning that naturally overlaps with answer
-- τ too high → fails to catch semantic leaking
+- λ too high → over-abstention: model learns "Unknown" is always safe, ignores disambiguated questions
+- λ too low → fairness signal drowned out, structural training dominates
+- Both are covered by the λ ablation experiment
 
-## Planned Ablations
-1. R_correctness only (baseline)
-2. R_correctness + R_fairness (no penalties)
-3. Full R_total (with P_structural + P_leak)
-4. λ sweep: {0.1, 0.3, 0.5, 0.7, 1.0}
+## Ablation Plan (λ=0 replaces R_correctness-only baseline)
+| Condition | Equation | Purpose |
+|---|---|---|
+| λ=0 (`grpo_no_fairness.py`) | `R_total = -P_structural` | Does GRPO alone improve fairness? |
+| λ=0.1 | `R_total = 0.1·R_fairness - P_structural` | Minimum fairness signal |
+| λ=0.3 | `R_total = 0.3·R_fairness - P_structural` | Conservative fairness |
+| λ=0.5 (**default**) | `R_total = 0.5·R_fairness - P_structural` | Main experiment |
+| λ=0.7 | `R_total = 0.7·R_fairness - P_structural` | Aggressive fairness |
+| λ=1.0 | `R_total = R_fairness - P_structural` | Maximum fairness signal |

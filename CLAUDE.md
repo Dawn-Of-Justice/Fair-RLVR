@@ -97,7 +97,7 @@ python -m src.data
 | Gender Identity | 0.304 | **0.000** |
 | Disability | 0.500 | 0.500 |
 
-**Training dynamics**: Mean reward rose from 1.406 (step 11) → 1.500 (step 500, theoretical max for λ=0.5). Reward std collapsed to 0.0 at mid-training, then re-emerged at step 1000 (mean 1.472, std 0.026). KL stabilized at 0.017.
+**Training dynamics**: Mean reward rose from 0.406 (step 11) → 0.500 (step 500, theoretical max for λ=0.5; R_max = 0.5 × 1.0 = 0.5). Reward std collapsed to 0.0 at mid-training, then re-emerged at step 3500 (mean 0.472, std 0.026). KL stabilized at 0.017.
 
 **Causal faithfulness test** (100 samples, sentence permutation corruption): P(correct | real CoT) = 1.000, P(correct | corrupted CoT) = 0.990, faithfulness score = **0.010** — fair behavior is internalized at the representation level, not dependent on the textual reasoning chain.
 

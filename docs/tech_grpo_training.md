@@ -48,32 +48,50 @@ Models go through phases during training:
 - Risk is real for Qwen2.5-3B
 - Mitigation: monitor bias scores throughout training, not just at end
 
-## Recommended Hyperparameters (starting point)
+## Hyperparameters (as implemented in `configs/fair_rlvr.yaml` / `src/train.py`)
 ```python
-model         = "Qwen2.5-3B-Instruct"
-quantization  = "4-bit" (bitsandbytes / unsloth)
-lora_r        = 16
-lora_alpha    = 32
-lr            = 1e-5
-group_size    = 8          # G outputs per prompt
-max_new_tokens = 512       # for <think> block
-batch_size    = 4
-gradient_accumulation = 4  # effective batch = 16
-clip_ratio_high = 0.28     # DAPO fix
-clip_ratio_low  = 0.20
-kl_coeff      = 0.01
-training_steps = ~500-1000  # Med-RLVR used ~1K samples
+model                 = "Qwen/Qwen2.5-3B-Instruct"
+quantization          = "4-bit" (bitsandbytes nf4)  # NOT unsloth
+lora_r                = 16
+lora_alpha            = 32
+lora_targets          = ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]
+lr                    = 1e-5
+group_size            = 16         # G=16 outputs per prompt (was 8 in early plan)
+max_new_tokens        = 512
+batch_size            = 8          # per-device (was 4 in early plan)
+gradient_accumulation = 2          # effective batch = 16 (was 4 in early plan)
+clip_ratio_high       = 0.28       # DAPO asymmetric clipping
+clip_ratio_low        = 0.20
+kl_coeff              = 0.01
+training_steps        = 3500       # was 500-1000 in early plan
+save_steps            = 500        # checkpoints at 500,1000,1500,2000,2500,3000,3500
+train_ratio           = 0.9        # 90/10 split of full 58,492 BBQ dataset
+seed                  = 42         # MUST match eval seed — see data leakage note
 ```
 
-## Library Stack
+## Library Stack (actual)
 - `trl` (HuggingFace) — GRPOTrainer
-- `unsloth` — 4-bit quantization + LoRA for T4
+- `bitsandbytes` — 4-bit quantization (nf4). **NOT unsloth** — bitsandbytes used throughout
 - `peft` — LoRA adapter
-- `datasets` — BBQ loading
+- `datasets` (HuggingFace) — BBQ loading from `Elfsong/BBQ`
+- `sentence-transformers` — no longer used (P_leak removed from reward)
 - `torch` — backend
 
-## DAPO Techniques to Incorporate
-1. **Clip-Higher**: asymmetric clip ratios (above)
-2. **Dynamic Sampling**: filter out prompts where all G outputs get same reward (no gradient signal)
-3. **Token-level policy gradient loss** instead of sequence-level (more stable)
-4. **Entropy regularization**: add small entropy bonus to reward to prevent collapse
+## DAPO Techniques: Implemented vs Not
+| Technique | Status | Notes |
+|---|---|---|
+| Clip-Higher (asymmetric ε) | ✅ Implemented | `epsilon=0.20`, `epsilon_high=0.28` in GRPOConfig |
+| Token-level policy gradient | ✅ Implemented | TRL's GRPOTrainer uses token-level by default |
+| Dynamic Sampling | ❌ Not implemented | Would filter all-correct / all-wrong groups; adds complexity |
+| Entropy regularization bonus | ❌ Not implemented | Asymmetric clipping already handles entropy collapse |
+
+## Data Leakage Warning
+Training and evaluation both use `create_splits(train_ratio=0.9, seed=seed)`.
+If the seeds differ between training and eval, the eval set may overlap with training data.
+**Always run evaluation with `--seed 42` (or whatever seed was used in training).**
+All baseline scripts now accept `--seed` and default to 42.
+
+## Known Failure Mode: Small Model Bias Amplification
+- FairReason showed 3B models can get *more* biased as reasoning improves at intermediate steps
+- Track bias score every 100 steps via the `FairRLVRCallback` — not just at the end
+- If amplification occurs, document the λ range and training step where it peaks
