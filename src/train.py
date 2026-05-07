@@ -239,7 +239,7 @@ def train(
     model_kwargs = {
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16,
-        "attn_implementation": "flash_attention_2",
+        "attn_implementation": "sdpa",
     }
 
     if use_4bit:
