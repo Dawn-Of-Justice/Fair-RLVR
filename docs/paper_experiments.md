@@ -17,12 +17,12 @@ type: project
 ## Experiment 1: Main Result
 **Question:** Does Fair-RLVR reduce bias without degrading reasoning?
 
-| Condition | BBQ (Ambig) | BBQ (Disambig) | MMLU | GSM8K |
-|---|---|---|---|---|
-| Zero-shot baseline | | | | |
-| SFT baseline | | | | |
-| GRPO (correctness only) | | | | |
-| Fair-RLVR (full) | | | | |
+| Condition | BBQ (Ambig) | BBQ (Disambig) | Bias Score (BBQ official) | MMLU | GSM8K |
+|---|---|---|---|---|---|
+| Zero-shot baseline | | | | | |
+| SFT baseline | | | | | |
+| GRPO (λ=0, no fairness reward) | | | | | |
+| Fair-RLVR (λ=0.5) | | | | | |
 
 Goal: Fair-RLVR best on BBQ, competitive on MMLU/GSM8K
 
@@ -45,35 +45,44 @@ Watch for: λ>0.7 → over-abstention; λ<0.3 → fairness signal lost
 - Log reward per training step (handled by `FairRLVRCallback.on_step_end`)
 - Log abstention rate and per-step reward breakdown (handled by `log_generation_batch`)
 - Phase classification logged by `TrainingDynamicsLogger` → saved to `results/fair_rlvr/dynamics/phase_log.json`
-- CoT samples saved at: 100, 250, 500, 750, 1000 steps (configurable via `cot_checkpoint_steps`)
+- CoT samples saved at: 100, 500, 1000, 1500, 2000, 2500, 3000, 3500 steps (configurable via `cot_checkpoint_steps`)
 - Checkpoint model weights saved every 500 steps (3500 total → 7 checkpoints)
 - Look for Phase 4 "The Hacker" (answer inside `<think>`) and Phase 6 "Reintegrated Reasoning"
 
-## Experiment 4: Causal Faithfulness
-**Question:** Is the CoT causally linked to the answer, or post-hoc?
+## Experiment 4: Interventional Sensitivity Test
+**Question:** Is model behavior sensitive to the CoT content, or is the CoT decorative?
 
-Method: Interventional Sufficiency Test
-1. Take trained model output: (context, CoT, answer)
-2. Corrupt CoT by randomly permuting sentences
+Method: Sentence-permutation sensitivity test
+1. Take trained model output: (context, CoT, answer) — correct predictions only
+2. Corrupt CoT by randomly permuting its sentences
 3. Feed corrupted CoT → measure if answer changes
-4. If answer degrades significantly → CoT is causally real
-5. Metric: Faithfulness Score = P(correct answer | real CoT) - P(correct answer | corrupted CoT)
+4. Metric: Sensitivity Score = P(correct | real CoT) - P(correct | corrupted CoT)
 
-Threshold: score > 0.15 = causally faithful (to be validated)
+**Important framing:** A high sensitivity score means the model's answers depend on CoT
+structure — consistent with causal reasoning. A low score (near 0) means the model
+answers correctly regardless of CoT — behavior is internalized at the representation
+level, not dependent on the textual reasoning chain. Neither outcome proves nor disproves
+causal reasoning mechanistically; report as "interventional sensitivity" not "causal proof."
+
+Note: No arbitrary threshold — report the raw score and let the reader interpret.
 
 ## Experiment 5: Generalization (OOD Fairness)
 **Question:** Does Fair-RLVR generalize beyond BBQ training distribution?
 
 Eval on:
-- **WinoBias** (gender/coreference — different format from BBQ)
+- **WinoBias** (gender/coreference — different format and task type from BBQ)
 - **StereoSet** (association-level bias — different task type)
-- **Novel demographic** from BBQ held-out categories
+- **Intersectional BBQ** (`race_x_gender`, `race_x_ses`) — same format, unseen demographic combinations
+
+Note: All 9 base BBQ categories are in the training split. There are NO held-out BBQ
+categories in the main experiment. OOD evidence comes only from WinoBias, StereoSet,
+and intersectional BBQ. Do not claim generalization to "held-out BBQ categories."
 
 ## Experiment 6: Small Model Bias Amplification Check
 **Question:** Does improved reasoning increase bias (FairReason warning)?
 
-- Track bias score (stereotype-consistent errors / total errors) every 100 steps
-- If score *increases* at any point, document the λ range where this occurs
+- Track **official BBQ bias score** (`bias_score_bbq`) per checkpoint (every 500 steps)
+- If score *increases* at any point, document the training step and λ range where this occurs
 - This is a potential negative result worth reporting
 
 ## Stress Test: Trick Prompts

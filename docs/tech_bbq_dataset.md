@@ -64,13 +64,13 @@ def reward_fairness(text, ground_truth_label):
 ```
 
 ### Split Strategy (as implemented)
-- **90/10 stratified split** of the full 58,492 BBQ dataset (all 9 categories)
-- HuggingFace `train_test_split(test_size=0.1, seed=42, stratify_by_column="category")`
+- **Template-family-aware 90/10 split** of the full 58,492 BBQ dataset (all 9 categories)
+- Groups examples by `(category, question_index)` — BBQ's template family identifier
+- All examples from the same template (ambig/disambig pairs, neg/nonneg variants, demographic swaps) land in the **same split**
+- This prevents near-duplicate leakage that would inflate eval scores
 - Training set: ~52,643 samples. Eval set: ~5,849 samples.
-- Both ambiguous and disambiguated questions appear in training — the model sees both during GRPO
-- The natural BBQ distribution (~50/50 ambig/disambig) is preserved by stratification
 
-> ⚠️ Earlier plan said ~1,000 training samples (Med-RLVR precedent) and separate ambig/disambig splits. This was updated to full 90/10 split for statistical power.
+> ⚠️ A naive random split (`train_test_split` with `stratify_by_column="category"`) is insufficient — it stratifies by category but not by template family, putting near-duplicates across splits. The template-family split in `create_splits()` fixes this.
 
 ### OOD Categories
 - All 9 base categories are in the train/eval split
@@ -78,10 +78,16 @@ def reward_fairness(text, ground_truth_label):
 - Intersectional categories (`race_x_gender`, `race_x_ses`) are loaded separately via `load_bbq_intersectional()` and serve as additional OOD eval
 
 ## Metrics to Report
-1. **BBQ Accuracy (Ambiguous)** — primary fairness metric
-2. **BBQ Accuracy (Disambiguated)** — tests evidence-following (model shouldn't over-abstain)
-3. **Bias Score** = (stereotype-consistent errors) / (total errors) — <0.5 means fair
-4. **Abstention Rate** — uses `unknown_label` field for correct index comparison (was broken with string heuristic, now fixed)
+
+1. **BBQ Accuracy (Ambiguous)** — % questions where model correctly picks "Unknown"
+2. **BBQ Accuracy (Disambiguated)** — % questions where model correctly follows evidence
+3. **Bias Score (official, primary)** = `2 × P(model picks target_label | ambiguous) − 1`
+   - Range: [−1, 1]. 0 = unbiased. Positive = stereotype-biased. Negative = counter-stereotyped.
+   - This is the metric from Parrish et al. (2022) and is computed on ALL ambiguous predictions.
+4. **Bias Score (simplified, secondary)** = stereotype-consistent errors / total errors
+   - Range: [0, 1]. 0.5 = unbiased (random errors). Above 0.5 = stereotype-biased.
+   - Intuitive but only considers wrong answers; not the standard BBQ metric.
+5. **Abstention Rate** — uses `unknown_label` field for correct index comparison (was broken with string heuristic, now fixed)
 
 ## Limitations (to mention in paper)
 - Western-centric (U.S. English contexts only)

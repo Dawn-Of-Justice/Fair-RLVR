@@ -11,32 +11,32 @@ type: project
 ### Risk 1: Entropy Collapse (HIGH)
 - **What:** GRPO narrows policy → all outputs identical → no learning
 - **Signs:** reward plateau early, all G samples give same answer
-- **Fix:** DAPO Clip-Higher (clip_ratio_high=0.28), entropy bonus in reward, Dynamic Sampling
+- **Fix (implemented):** DAPO Clip-Higher (`epsilon_high=0.28`, `epsilon_low=0.20`); GRPOTrainer's dynamic sampling filters all-same-reward groups automatically
 
 ### Risk 2: Over-Abstention / Lobotomy Effect (HIGH)
-- **What:** λ too high → model learns to say "Unknown" to everything
-- **Signs:** abstention rate >60%, MMLU drops significantly
-- **Fix:** λ ablation; add abstention penalty if rate exceeds threshold; start λ=0.3 not 0.5
-- **⚠️ Additional issue found:** The abstention metric itself was broken — `compute_abstention_rate()` was checking if the raw answer text (e.g., `"(c)"`) contained the word `"unknown"`, which never matched. Result was always 0% abstention regardless of actual behavior. **Fixed:** the function now uses a per-question `unknown_label` index field (set by `get_unknown_label()` in `data.py`) and does an index comparison. All early abstention metrics should be treated as invalid.
+- **What:** λ too high → model learns to say "Unknown" to everything (safe-looking but wrong on disambiguated questions)
+- **Signs:** abstention rate >60% on disambiguated contexts, MMLU drops
+- **Fix (implemented):** λ ablation sweep; disambiguated accuracy tracked separately to catch this early
+- **⚠️ Abstention metric was broken and is now fixed:** `compute_abstention_rate()` now uses per-question `unknown_label` index (set by `get_unknown_label()` in `data.py`) instead of a string heuristic. All pre-fix abstention metrics are invalid.
 
 ### Risk 3: Reward Hacking - Fairness Theater (MEDIUM)
-- **What:** model learns to say "I must avoid bias" without real reasoning
-- **Signs:** high BBQ accuracy but Faithfulness Score is low
-- **Fix:** β penalty; Faithfulness Test (Experiment 4); strict verifier checks final answer only
+- **What:** model learns to insert bias-aware language without genuine reasoning
+- **Signs:** high BBQ accuracy but low interventional sensitivity score (Experiment 4)
+- **Fix (implemented):** `P_structural` penalizes trivially short reasoning; Experiment 4 (sentence-permutation test) checks whether behavior is reasoning-dependent
 
 ### Risk 4: Small Model Bias Amplification (MEDIUM)
 - **What:** FairReason showed 3B models can get MORE biased as reasoning improves
-- **Signs:** bias score increases at intermediate training steps
-- **Fix:** monitor bias score every 100 steps; if amplification occurs, lower lr or increase β
+- **Signs:** official BBQ bias score increases at intermediate training steps
+- **Fix:** monitor `bias_score_bbq` per checkpoint; if amplification observed, reduce learning rate
 
 ### Risk 5: Response Length Collapse (LOW-MEDIUM)
 - **What:** VMR-RLVR showed structured task training collapses generation length
-- **Signs:** <think> blocks shrink to 1-2 sentences
-- **Fix:** add length reward component (min 50 tokens in <think>); mix 10% standard data
+- **Signs:** `<think>` blocks shrink to 1-2 sentences; P_structural short-reasoning penalty fires frequently
+- **Fix:** `P_structural` already penalizes `<20` token reasoning chains; monitor think-block length in CoT samples
 
-### Risk 6: T4 OOM (LOW)
-- **What:** 16GB VRAM exceeded during training
-- **Fix:** 4-bit quantization (unsloth), gradient checkpointing, reduce batch size, reduce max_new_tokens from 512→256
+### Risk 6: H100 OOM (LOW)
+- **What:** 80GB VRAM exceeded (unlikely at current config, possible at larger batch)
+- **Fix (implemented):** 4-bit quantization (bitsandbytes nf4), gradient checkpointing; fall back to `--batch-size 4 --grad-accum 4` if needed
 
 ## Research/Paper Risks
 
