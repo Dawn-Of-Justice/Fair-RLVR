@@ -507,8 +507,9 @@ if __name__ == "__main__":
                         help="Path to LoRA adapter directory (e.g. results/fair_rlvr/final_adapter)")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct",
                         help="Base model name")
-    parser.add_argument("--n-eval", type=int, default=500,
-                        help="Eval samples per condition")
+    parser.add_argument("--n-eval", type=int, default=None,
+                        help="Max eval samples to use (default: full 10%% split, ~5,849 samples). "
+                             "Pass a small number (e.g. 200) for quick iteration.")
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--output-dir", type=str, default=None,
                         help="Output directory (defaults to checkpoint parent dir)")

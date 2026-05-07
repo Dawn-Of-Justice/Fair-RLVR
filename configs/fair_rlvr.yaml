@@ -3,17 +3,15 @@
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
-# Data
-n_train: 1000
-n_eval: 500
+# Data — full 90/10 split of BBQ (52,643 train / 5,849 eval)
+train_ratio: 0.9
 
 # Reward
 lambda_fair: 0.5
-tau: 0.85
 
 # Training
 learning_rate: 1.0e-5
-num_train_steps: 1000
+num_train_steps: 3500
 group_size: 16
 batch_size: 8
 gradient_accumulation: 2
@@ -25,5 +23,5 @@ lora_alpha: 32
 
 # Output
 output_dir: "results/fair_rlvr"
-save_steps: 250
+save_steps: 500
 seed: 42

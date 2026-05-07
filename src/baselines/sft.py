@@ -106,18 +106,21 @@ def train_sft(
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,   # Match train.py (bfloat16, not float16)
         device_map=device,
         trust_remote_code=True,
     )
 
     # ── LoRA ───────────────────────────────────────────────
+    # Target modules must match train.py exactly so the SFT baseline has the
+    # same number of trainable parameters as Fair-RLVR (fair comparison).
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=0.05,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj"],
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()

@@ -8,17 +8,15 @@
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
-# Data
-n_train: 1000
-n_eval: 500
+# Data — full 90/10 split of BBQ (same split as main experiment; seed must match)
+train_ratio: 0.9
 
 # Reward — lambda overridden via CLI
 lambda_fair: 0.5
-tau: 0.85
 
-# Training
+# Training — identical to main experiment for fair comparison
 learning_rate: 1.0e-5
-num_train_steps: 1000
+num_train_steps: 3500
 group_size: 16
 batch_size: 8
 gradient_accumulation: 2
@@ -28,7 +26,7 @@ kl_coeff: 0.01
 lora_r: 16
 lora_alpha: 32
 
-# Output — overridden via CLI
+# Output — overridden via CLI per lambda value
 output_dir: "results/lambda_sweep"
-save_steps: 250
+save_steps: 500
 seed: 42

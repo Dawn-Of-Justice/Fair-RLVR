@@ -241,7 +241,7 @@ def train(
     )
     fair_callback = FairRLVRCallback(
         output_dir=str(output_path / "logs"),
-        cot_checkpoint_steps=[100, 250, 500, 750, 1000],
+        cot_checkpoint_steps=[100, 500, 1000, 1500, 2000, 2500, 3000, 3500],
         dynamics_logger=dynamics_logger,
     )
 
