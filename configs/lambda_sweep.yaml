@@ -21,7 +21,6 @@ group_size: 8
 batch_size: 8
 gradient_accumulation: 2
 max_new_tokens: 256
-max_prompt_length: 512
 kl_coeff: 0.01
 
 # LoRA

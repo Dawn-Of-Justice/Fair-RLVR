@@ -37,18 +37,23 @@ def extract_answer(text: str) -> Optional[str]:
     Extract the answer option from model output.
     Looks for <answer>...</answer> tags and extracts (a), (b), or (c).
 
+    When multiple option markers appear in the same answer block, the LAST
+    one wins — a hedged answer like "between (a) and (b), I pick (b)" should
+    resolve to (b), not (a).
+
     Returns: "(a)", "(b)", "(c)", or None if not found/invalid.
     """
     match = re.search(r"<answer>\s*(.*?)\s*</answer>", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        content = match.group(1).strip().lower()
-        for option in ["(a)", "(b)", "(c)"]:
-            if option in content:
-                return option
-        for letter in ["a", "b", "c"]:
-            if content == letter:
-                return f"({letter})"
+    if not match:
         return None
+    content = match.group(1).strip().lower()
+    # Find all option markers and return the last one
+    found = re.findall(r"\(([abc])\)", content)
+    if found:
+        return f"({found[-1]})"
+    # Bare letter fallback (e.g. "a")
+    if content in {"a", "b", "c"}:
+        return f"({content})"
     return None
 
 

@@ -19,7 +19,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import GRPOConfig, GRPOTrainer
 from datasets import Dataset
 
-from src.data import create_splits, format_bbq_prompt, SYSTEM_PROMPT
+from src.data import create_splits, SYSTEM_PROMPT
 from src.reward import compute_reward
 from src.callbacks import FairRLVRCallback, TrainingDynamicsLogger
 
@@ -151,8 +151,7 @@ def train(
     group_size: int = 8,
     batch_size: int = 8,
     gradient_accumulation: int = 2,
-    max_new_tokens: int = 512,
-    max_prompt_length: int = 512,
+    max_new_tokens: int = 256,
     lora_r: int = 16,
     lora_alpha: int = 32,
     kl_coeff: float = 0.01,
@@ -178,7 +177,6 @@ def train(
         batch_size: per-device batch size
         gradient_accumulation: gradient accumulation steps
         max_new_tokens: max generated tokens
-        max_prompt_length: max prompt tokens
         lora_r: LoRA rank
         lora_alpha: LoRA alpha scaling
         kl_coeff: KL divergence coefficient
@@ -401,7 +399,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--grad-accum", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=None)
-    parser.add_argument("--max-prompt-length", type=int, default=None)
     parser.add_argument("--kl-coeff", type=float, default=None)
 
     # LoRA
@@ -443,7 +440,6 @@ if __name__ == "__main__":
         "batch_size": _resolve(args.batch_size, "batch_size", 8),
         "gradient_accumulation": _resolve(args.grad_accum, "gradient_accumulation", 2),
         "max_new_tokens": _resolve(args.max_new_tokens, "max_new_tokens", 256),
-        "max_prompt_length": _resolve(args.max_prompt_length, "max_prompt_length", 512),
         "lora_r": _resolve(args.lora_r, "lora_r", 16),
         "lora_alpha": _resolve(args.lora_alpha, "lora_alpha", 32),
         "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),

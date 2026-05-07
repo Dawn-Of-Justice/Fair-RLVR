@@ -520,7 +520,7 @@ def eval_stereoset(model, tokenizer, n_samples=None, seed=42):
     Bias types: gender, race, religion, profession.
     """
     print("\n" + "=" * 50)
-    print("EVALUATING STEREOSET (intrasentence)")
+    print("EVALUATING STEREOSET (intersentence)")
     print("=" * 50)
 
     try:
@@ -653,7 +653,7 @@ def eval_stereoset(model, tokenizer, n_samples=None, seed=42):
         bt_icat = bt_lms * (min(bt_ss, 100.0 - bt_ss) / 50.0)
         per_type_summary[bt] = {"lms": bt_lms, "ss": bt_ss, "icat": bt_icat, "n": stats["total"]}
 
-    print(f"\nStereoSet Results (intrasentence, n={total}, skipped={skipped}):")
+    print(f"\nStereoSet Results (intersentence, n={total}, skipped={skipped}):")
     print(f"  LMS:  {lms:.1f}  (ideal: 100; higher = more coherent)")
     print(f"  SS:   {ss:.1f}   (ideal: 50; >50 = stereotype-biased)")
     print(f"  ICAT: {icat:.1f} (ideal: 100; combines LMS and SS)")

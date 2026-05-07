@@ -248,31 +248,6 @@ def create_splits(
     }
 
 
-def format_for_grpo(dataset: Dataset) -> list[dict]:
-    """
-    Format dataset for GRPOTrainer.
-
-    Returns a list of dicts with:
-        - "prompt": list of messages (system + user)
-        - "answer_label": ground truth label index
-        - "category": BBQ category
-        - "context_condition": ambig or disambig
-    """
-    formatted = []
-    for example in dataset:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": example["prompt"]},
-        ]
-        formatted.append({
-            "prompt": messages,
-            "answer_label": example["answer_label"],
-            "category": example["category"],
-            "context_condition": example["context_condition"],
-        })
-    return formatted
-
-
 # ── Quick test ──────────────────────────────────────────────
 if __name__ == "__main__":
     from collections import Counter

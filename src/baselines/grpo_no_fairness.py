@@ -34,7 +34,6 @@ def run_grpo_no_fairness(
     batch_size: int = 8,
     gradient_accumulation: int = 2,
     max_new_tokens: int = 256,
-    max_prompt_length: int = 512,
     lora_r: int = 16,
     lora_alpha: int = 32,
     kl_coeff: float = 0.01,
@@ -67,7 +66,6 @@ def run_grpo_no_fairness(
         batch_size=batch_size,
         gradient_accumulation=gradient_accumulation,
         max_new_tokens=max_new_tokens,
-        max_prompt_length=max_prompt_length,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
         kl_coeff=kl_coeff,
@@ -105,7 +103,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--grad-accum", type=int, default=2)
     parser.add_argument("--max-new-tokens", type=int, default=256)
-    parser.add_argument("--max-prompt-length", type=int, default=512)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--kl-coeff", type=float, default=0.01)
@@ -125,7 +122,6 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         gradient_accumulation=args.grad_accum,
         max_new_tokens=args.max_new_tokens,
-        max_prompt_length=args.max_prompt_length,
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         kl_coeff=args.kl_coeff,

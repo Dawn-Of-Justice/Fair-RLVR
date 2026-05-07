@@ -116,7 +116,7 @@ def train_sft(
         torch_dtype=torch.bfloat16,   # Match train.py (bfloat16, not float16)
         device_map=device,
         trust_remote_code=True,
-        attn_implementation="flash_attention_2",
+        attn_implementation="sdpa",
     )
 
     # ── LoRA ───────────────────────────────────────────────
@@ -222,7 +222,6 @@ def train_sft(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
-                temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
             )
 

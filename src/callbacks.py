@@ -86,11 +86,14 @@ class FairRLVRCallback(TrainerCallback):
             # (from log_generation_batch) when one is available.
             if step % 50 == 0:
                 latest_batch = self.batch_logs[-1] if self.batch_logs else None
+                # TRL doesn't always populate reward/kl/loss on the first few
+                # log_history entries; coalesce None to 0.0 so formatting
+                # never raises on early steps.
                 base = (
                     f"\n[Step {step}] "
-                    f"reward={log_entry['reward_mean']:.3f} | "
-                    f"kl={log_entry.get('kl_divergence', 0):.4f} | "
-                    f"loss={log_entry.get('loss', 0):.4f}"
+                    f"reward={(log_entry['reward_mean'] or 0.0):.3f} | "
+                    f"kl={(log_entry.get('kl_divergence') or 0.0):.4f} | "
+                    f"loss={(log_entry.get('loss') or 0.0):.4f}"
                 )
                 if latest_batch is not None:
                     base += (
@@ -267,10 +270,14 @@ class FairRLVRCallback(TrainerCallback):
         }
         self.batch_logs.append(step_summary)
 
-        # Save CoT samples at checkpoint steps
+        # Save CoT samples at checkpoint steps.
+        # With gradient accumulation, log_generation_batch fires multiple times
+        # per training step. Extend the bucket instead of overwriting so we
+        # keep samples from every micro-batch.
         if step in self.cot_checkpoint_steps:
-            self.cot_samples[str(step)] = cot_examples
-            print(f"\n[Step {step}] Saved {len(cot_examples)} CoT samples")
+            self.cot_samples.setdefault(str(step), []).extend(cot_examples)
+            print(f"\n[Step {step}] Saved {len(cot_examples)} CoT samples "
+                  f"(total at step: {len(self.cot_samples[str(step)])})")
             for ex in cot_examples[:2]:
                 print(f"  [{ex['category']}] correct={ex['is_correct']} | "
                       f"think: {ex['think'][:100]}...")
