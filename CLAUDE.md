@@ -1,97 +1,16 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
-## Project Summary
+## Project Overview
 
-Fair-RLVR studies whether fairness behavior can be trained with Reinforcement Learning
-from Verifiable Rewards (RLVR) using BBQ as the verifier. The implemented setup uses:
+Fair-RLVR applies Reinforcement Learning from Verifiable Rewards (RLVR) to **fairness alignment** using the BBQ benchmark as an automated fairness verifier. The model (Qwen2.5-3B-Instruct + LoRA) is trained via GRPO with a composite reward:
 
-- Base model: `Qwen/Qwen2.5-3B-Instruct`
-- Training method: GRPO with LoRA
-- Task format: BBQ multiple-choice QA
-- Required output format:
-  `<think>...</think><answer>(a|b|c)</answer>`
-
-The current implemented reward is:
-
-```text
-R_total = lambda_fair * R_fairness - P_structural
+```
+R_total = R_correctness + λ · R_fairness - P_structural - P_leak
 ```
 
-Do not reintroduce `R_correctness` or `P_leak` unless the user explicitly asks for a
-design change. The docs are consistent that those were removed from the working design.
-
-## What To Treat As Source Of Truth
-
-Use the docs folder as the project brief, but distinguish between:
-
-- implemented repo behavior
-- planned experiments/paper claims
-- reported results
-
-Be strict about this distinction. Several docs mix these together.
-
-For code-facing work, prefer these files:
-
-- `docs/adr_fair_rlvr.md`
-- `docs/tech_reward_function.md`
-- `docs/tech_bbq_dataset.md`
-- `docs/tech_grpo_training.md`
-- `docs/paper_experiments.md`
-
-If a claim in prose conflicts with code, call out the conflict instead of silently
-copying the claim forward.
-
-## Operational Ground Rules
-
-### Data and splits
-
-- BBQ is loaded from HuggingFace via `src/data.py`.
-- The implemented split is a template-family-aware `90/10` split over the full base BBQ
-  dataset, not category holdout training.
-- Keep the training/eval `seed` aligned across all scripts. Seed mismatch causes split
-  drift and can invalidate evaluation.
-- Intersectional BBQ categories (`race_x_gender`, `race_x_ses`) are separate OOD eval,
-  not part of the main train/eval split.
-
-### Unknown / abstention handling
-
-- The "Unknown" option is not always `(c)`.
-- Use `unknown_label` from `src.data.get_unknown_label()`.
-- Do not hardcode abstention as option index `2`.
-
-### Reward function
-
-- `R_fairness`: `+1` if predicted answer matches `answer_label`, else `0`
-- `P_structural`: three rule-based penalties, `0.3` each
-  - too-short or missing `<think>`
-  - answer leak into `<think>`
-  - content outside `<think>` / `<answer>`
-
-### Training
-
-- Main training entry point: `python -m src.train`
-- Default intended config:
-  - `lambda_fair=0.5`
-  - `num_train_steps=3500`
-  - `group_size=16`
-  - `batch_size=8`
-  - `gradient_accumulation=2`
-  - `save_steps=500`
-  - 4-bit `bitsandbytes` quantization during training
-- LoRA target modules:
-  `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`
-
-### Evaluation
-
-- Main evaluation entry point: `python -m src.evaluate`
-- Primary fairness metric for paper-quality evaluation is the official BBQ bias score:
-  `2 * P(target_label | ambiguous) - 1`
-- The simplified stereotype-error ratio is secondary and should not be presented as the
-  canonical BBQ metric.
-- Do not claim OOD generalization to held-out BBQ base categories. The docs support OOD
-  claims only for WinoBias, StereoSet, and intersectional BBQ evaluation.
+The model must generate outputs in `<think>...</think><answer>(a/b/c)</answer>` format to receive any reward.
 
 ## Commands
 
@@ -100,50 +19,94 @@ copying the claim forward.
 pip install -e .
 pip install -r requirements.txt
 
-# Dry run
+# Dry run (5 steps, verifies pipeline works end-to-end)
 python -m src.train --dry-run
 
-# Main training
+# Train with a config file
 python -m src.train --config configs/fair_rlvr.yaml
 
-# Lambda sweep / overrides
+# Train with CLI overrides (lambda sweep example)
 python -m src.train --lambda-fair 0.1 --output-dir results/lambda_0.1
 
-# Baselines
+# Run baselines
 python -m src.baselines.baseline_model
 python -m src.baselines.sft
 python -m src.baselines.grpo_no_fairness
 
-# Evaluation
+# Evaluate a trained adapter
 python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter
+
+# Evaluate with causal faithfulness test (Experiment 4)
 python -m src.evaluate --checkpoint results/fair_rlvr/final_adapter --run-faithfulness
 
-# Pipeline checks
+# Test reward function directly
 python -m src.reward
+
+# Test data pipeline
 python -m src.data
 ```
 
-## Research-Claim Hygiene
+## Architecture
 
-When editing code, docs, or paper text:
+### Data flow (`src/data.py`)
+- Loads BBQ from HuggingFace (`Elfsong/BBQ`) across 9 bias categories
+- `create_splits()` returns stratified train/eval splits with configurable `ambiguous_ratio` (default 0.7 ambig : 0.3 disambig)
+- Religion and sexual_orientation are held out by default as OOD eval categories
+- Intersectional categories (`race_x_gender`, `race_x_ses`) are always held out separately
+- `SYSTEM_PROMPT` in this file is the canonical prompt used across all training and inference
 
-- Do not present planned experiments as completed results.
-- Do not present old 4-component reward equations as current.
-- Do not claim DAPO features beyond what is clearly configured in this repo. The repo
-  explicitly configures asymmetric clipping; stronger dynamic-sampling claims should be
-  verified before repeating them.
-- Do not claim "accepted IEEE paper" or fixed benchmark wins unless the user wants repo
-  text to preserve that positioning. Treat that as project context, not a guaranteed fact.
-- If citing numbers, prefer numbers that exist in repository artifacts under `results/`
-  or in the active paper draft, and name the source.
+### Reward function (`src/reward.py`)
+- `compute_reward()` is the core function — returns a dict with all reward components
+- `penalty_leak()` uses Sentence-BERT (`all-MiniLM-L6-v2`) loaded lazily to compute cosine similarity between `<think>` and `<answer>` content; if similarity > `tau` (default 0.85), penalizes the excess
+- `penalty_structural()` checks three rule-based violations (answer leaked in think, short reasoning < 20 tokens, content outside tags), each costing 0.3
+- The SBERT model is a module-level singleton (`_sbert_model`) — avoid re-importing in hot paths
 
-## Important Repo Notes
+### Training (`src/train.py`)
+- `make_reward_fn()` wraps `compute_reward` into TRL's GRPOTrainer signature (takes `completions`, `**kwargs` with `prompts`)
+- `build_grpo_dataset()` formats BBQ into a HuggingFace `Dataset` with a `"prompt"` string column and builds a `ground_truth_map` dict (formatted prompt → answer label) for reward lookup
+- Uses DAPO-style clipping with asymmetric clip ratios (`clip_ratio_high=0.28`, `clip_ratio_low=0.20`)
+- Config files override defaults; CLI args override config files
 
-- `src/train.py` builds a `ground_truth_map` keyed by formatted prompt strings. Changes to
-  prompt formatting can break reward lookup if not updated carefully.
-- `SYSTEM_PROMPT` in `src/data.py` is part of the training contract. Keep training and
-  eval formatting aligned with it.
-- `src/callbacks.py` contains some older descriptive comments. Treat executable behavior
-  as authoritative over stale commentary.
-- Existing `results/` directories contain prior outputs and should be treated as data,
-  not as proof that every claim in docs is current.
+### Evaluation (`src/evaluate.py`)
+- `run_evaluation()` loads a LoRA adapter on top of the base model (no quantization at eval time — uses float16)
+- `compute_bias_score()` measures proportion of errors that are stereotype-consistent using BBQ's `target_label` field
+- `compute_faithfulness()` (Experiment 4) corrupts CoT by permuting sentences then re-runs inference to measure causal link
+
+### Callbacks (`src/callbacks.py`)
+- `FairRLVRCallback`: logs reward stats per step, saves CoT samples at configurable checkpoint steps
+- `TrainingDynamicsLogger`: classifies each batch into one of 6 training phases (Format Failure → Reintegrated Reasoning) tracking reward hacking progression
+
+## Key Design Decisions
+
+- **Lambda (`λ`)**: Controls fairness-vs-correctness tradeoff. Even `λ=0.1` achieves strong debiasing. Default is 0.5.
+- **Training uses 4-bit quantization** (`bitsandbytes` nf4); evaluation loads in float16 without quantization.
+- **LoRA targets**: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` (all attention + MLP projections).
+- **Bias score < 0.5** means fair; 0.5 = random errors; > 0.5 = stereotyped errors.
+- The `ground_truth_map` keyed on formatted prompt strings is the mechanism tying GRPO completions back to their ground-truth labels — this is rebuilt from scratch each training run.
+
+## Detailed Results (from paper)
+
+**Per-category bias scores** (Zero-shot → Fair-RLVR):
+| Category | Zero-shot | Fair-RLVR |
+|---|---|---|
+| Age | 0.727 | 0.316 |
+| SES | 0.655 | 0.500 |
+| Nationality | 0.556 | 0.111 |
+| Physical Appearance | 0.571 | 0.400 |
+| Race/Ethnicity | 0.476 | 0.231 |
+| Gender Identity | 0.304 | **0.000** |
+| Disability | 0.500 | 0.500 |
+
+**Training dynamics**: Mean reward rose from 0.406 (step 11) → 0.500 (step 500, theoretical max for λ=0.5; R_max = 0.5 × 1.0 = 0.5). Reward std collapsed to 0.0 at mid-training, then re-emerged at step 3500 (mean 0.472, std 0.026). KL stabilized at 0.017.
+
+**Causal faithfulness test** (100 samples, sentence permutation corruption): P(correct | real CoT) = 1.000, P(correct | corrupted CoT) = 0.990, faithfulness score = **0.010** — fair behavior is internalized at the representation level, not dependent on the textual reasoning chain.
+
+## Output Structure
+
+Each experiment writes to `results/<name>/`:
+- `config.json` — hyperparameters used
+- `logs/step_logs.json` — per-step reward metrics
+- `dynamics/phase_log.json` — training phase classifications
+- `final_adapter/` — LoRA adapter weights + tokenizer
+- `metrics.json` — evaluation results
+- `predictions.json` — per-sample model outputs
