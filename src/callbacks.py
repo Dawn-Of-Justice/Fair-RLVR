@@ -82,12 +82,27 @@ class FairRLVRCallback(TrainerCallback):
             }
             self.step_logs.append(log_entry)
 
-            # Print periodic summary
+            # Print periodic summary including the latest reward-component breakdown
+            # (from log_generation_batch) when one is available.
             if step % 50 == 0:
-                print(f"\n[Step {step}] "
-                      f"reward={log_entry['reward_mean']:.3f} | "
-                      f"kl={log_entry.get('kl_divergence', 0):.4f} | "
-                      f"loss={log_entry.get('loss', 0):.4f}")
+                latest_batch = self.batch_logs[-1] if self.batch_logs else None
+                base = (
+                    f"\n[Step {step}] "
+                    f"reward={log_entry['reward_mean']:.3f} | "
+                    f"kl={log_entry.get('kl_divergence', 0):.4f} | "
+                    f"loss={log_entry.get('loss', 0):.4f}"
+                )
+                if latest_batch is not None:
+                    base += (
+                        f"\n           "
+                        f"acc={latest_batch.get('accuracy', 0):.3f} | "
+                        f"r_bin={latest_batch.get('avg_r_binary', 0):+.2f} | "
+                        f"p_struct={latest_batch.get('avg_p_structural', 0):.2f} | "
+                        f"p_stereo={latest_batch.get('avg_p_stereotype', 0):.3f} | "
+                        f"stereo_rate={latest_batch.get('stereotype_pick_rate_ambig', 0):.3f} | "
+                        f"abstain={latest_batch.get('abstention_rate', 0):.3f}"
+                    )
+                print(base)
 
     def on_save(self, args, state, control, **kwargs):
         """Save logs when a checkpoint is saved."""
@@ -124,6 +139,7 @@ class FairRLVRCallback(TrainerCallback):
         categories: list[str] = None,
         context_conditions: list[str] = None,
         unknown_labels: list[int] = None,
+        target_labels: list[int] = None,
         lambda_fair: float = 0.5,
     ):
         """
@@ -138,40 +154,69 @@ class FairRLVRCallback(TrainerCallback):
             ground_truth_labels: list of BBQ ground truth labels
             categories: list of BBQ categories (optional)
             context_conditions: list of "ambig" or "disambig" (optional)
-            unknown_labels: list of unknown option indices (0/1/2) from get_unknown_label() (optional)
-            lambda_fair: fairness reward weight — must match the training lambda so
-                batch_logs reflect the actual reward values, not the default 0.5
+            unknown_labels: list of unknown option indices (0/1/2) (optional)
+            target_labels: list of BBQ stereotype-aligned answer indices (optional);
+                required for P_stereotype to be reflected in r_total
+            lambda_fair: fairness reward weight — must match the training lambda
+                so batch_logs reflect the actual reward values, not a default
         """
         batch_stats = {
-            "r_fairness": [],
+            # New ternary correctness/format reward (-1, 0, +1)
+            "r_binary": [],
+            # Structural penalty (0.0 to 1.2)
             "p_structural": [],
+            # Raw stereotype penalty (0.0 or 0.5), pre-weighting
+            "p_stereotype": [],
+            # Total reward = r_binary - p_structural - lambda_fair * p_stereotype
             "r_total": [],
+            # Aggregate counts
             "abstained": 0,
             "total": 0,
             "correct": 0,
             "total_errors": 0,
+            "format_failures": 0,
+            "stereotype_picks_ambig": 0,
+            "n_ambig": 0,
+            "n_disambig": 0,
         }
 
         cot_examples = []
 
         for i, (completion, label) in enumerate(zip(completions, ground_truth_labels)):
-            result = compute_reward(completion, label, lambda_fair=lambda_fair)
-            batch_stats["r_fairness"].append(result["r_fairness"])
+            cond = context_conditions[i] if context_conditions is not None else None
+            tgt = target_labels[i] if target_labels is not None else None
+            result = compute_reward(
+                completion, label,
+                context_condition=cond,
+                target_label=tgt,
+                lambda_fair=lambda_fair,
+            )
+            batch_stats["r_binary"].append(result["r_binary"])
             batch_stats["p_structural"].append(result["p_structural"])
+            batch_stats["p_stereotype"].append(result["p_stereotype"])
             batch_stats["r_total"].append(result["r_total"])
             batch_stats["total"] += 1
 
-            # Check accuracy
+            # Check accuracy / format / errors
             answer = extract_answer(completion)
             pred_idx = answer_to_index(answer)
-            if pred_idx == label:
+            if pred_idx == -1:
+                batch_stats["format_failures"] += 1
+            elif pred_idx == label:
                 batch_stats["correct"] += 1
-            elif pred_idx != -1:
+            else:
                 batch_stats["total_errors"] += 1
 
-            # Check abstention: model picked the "Unknown" option.
-            # Use the per-question unknown_label index if available; do NOT hardcode index 2
-            # since "Unknown" can be option (a), (b), or (c) depending on the question.
+            # Track per-condition counts and stereotype picks (only meaningful in ambig)
+            if cond == "ambig":
+                batch_stats["n_ambig"] += 1
+                if tgt is not None and tgt >= 0 and pred_idx == tgt:
+                    batch_stats["stereotype_picks_ambig"] += 1
+            elif cond == "disambig":
+                batch_stats["n_disambig"] += 1
+
+            # Abstention: model picked the per-question "Unknown" option index.
+            # Don't hardcode index 2 — Unknown can be (a), (b), or (c).
             unknown_idx = unknown_labels[i] if unknown_labels is not None else -1
             if unknown_idx != -1 and pred_idx == unknown_idx:
                 batch_stats["abstained"] += 1
@@ -182,24 +227,48 @@ class FairRLVRCallback(TrainerCallback):
                 cot_examples.append({
                     "step": step,
                     "category": categories[i] if categories else "unknown",
-                    "condition": context_conditions[i] if context_conditions else "unknown",
+                    "condition": cond if cond else "unknown",
                     "think": think[:500] if think else "",
                     "answer": answer or "",
                     "correct_label": label,
+                    "target_label": tgt if tgt is not None else -1,
                     "is_correct": pred_idx == label,
+                    "is_format_failure": pred_idx == -1,
+                    "is_stereotype_pick": (
+                        cond == "ambig" and tgt is not None
+                        and tgt >= 0 and pred_idx == tgt
+                    ),
+                    "r_binary": result["r_binary"],
+                    "p_structural": result["p_structural"],
+                    "p_stereotype": result["p_stereotype"],
                     "reward": result["r_total"],
                 })
 
         # Compute averages
         n = batch_stats["total"]
+        n_ambig = batch_stats["n_ambig"]
+
+        def _avg(key):
+            return sum(batch_stats[key]) / n if n > 0 else 0.0
+
         step_summary = {
             "step": step,
-            "avg_r_total": sum(batch_stats["r_total"]) / n if n > 0 else 0,
-            "avg_r_fairness": sum(batch_stats["r_fairness"]) / n if n > 0 else 0,
-            "avg_p_structural": sum(batch_stats["p_structural"]) / n if n > 0 else 0,
-            "accuracy": batch_stats["correct"] / n if n > 0 else 0,
-            "abstention_rate": batch_stats["abstained"] / n if n > 0 else 0,
+            "lambda_fair": lambda_fair,
+            "avg_r_total": _avg("r_total"),
+            "avg_r_binary": _avg("r_binary"),
+            "avg_p_structural": _avg("p_structural"),
+            "avg_p_stereotype": _avg("p_stereotype"),
+            "accuracy": batch_stats["correct"] / n if n > 0 else 0.0,
+            "format_failure_rate": batch_stats["format_failures"] / n if n > 0 else 0.0,
+            "abstention_rate": batch_stats["abstained"] / n if n > 0 else 0.0,
+            # Stereotype rate is conditioned on ambig only — that's the slice
+            # P_stereotype actually fires on. NaN-safe: 0.0 when no ambig in batch.
+            "stereotype_pick_rate_ambig": (
+                batch_stats["stereotype_picks_ambig"] / n_ambig if n_ambig > 0 else 0.0
+            ),
             "n_samples": n,
+            "n_ambig": n_ambig,
+            "n_disambig": batch_stats["n_disambig"],
         }
         self.batch_logs.append(step_summary)
 

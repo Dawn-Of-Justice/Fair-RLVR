@@ -19,7 +19,10 @@ Usage:
 """
 
 import argparse
+from pathlib import Path
+
 from src.train import train
+from src.evaluate import run_evaluation
 
 
 def run_grpo_no_fairness(
@@ -27,9 +30,11 @@ def run_grpo_no_fairness(
     train_ratio: float = 0.9,
     learning_rate: float = 1e-5,
     num_train_steps: int = 3500,
-    group_size: int = 16,
+    group_size: int = 8,
     batch_size: int = 8,
     gradient_accumulation: int = 2,
+    max_new_tokens: int = 256,
+    max_prompt_length: int = 512,
     lora_r: int = 16,
     lora_alpha: int = 32,
     kl_coeff: float = 0.01,
@@ -40,7 +45,8 @@ def run_grpo_no_fairness(
     dry_run: bool = False,
 ):
     """
-    Train GRPO with λ=0 (no fairness reward) as an ablation baseline.
+    Train GRPO with λ=0 (no fairness reward) as an ablation baseline,
+    then evaluate on the BBQ eval set.
 
     All hyperparameters are identical to Fair-RLVR except lambda_fair=0.0,
     ensuring the only variable between this run and the main model is the
@@ -60,6 +66,8 @@ def run_grpo_no_fairness(
         group_size=group_size,
         batch_size=batch_size,
         gradient_accumulation=gradient_accumulation,
+        max_new_tokens=max_new_tokens,
+        max_prompt_length=max_prompt_length,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
         kl_coeff=kl_coeff,
@@ -70,6 +78,20 @@ def run_grpo_no_fairness(
         dry_run=dry_run,
     )
 
+    # ── Evaluate trained adapter ───────────────────────────
+    # Load the saved adapter and run full BBQ evaluation so metrics are
+    # available for the comparison table without a separate evaluate.py call.
+    if not dry_run:
+        checkpoint = str(Path(output_dir) / "final_adapter")
+        print(f"\nRunning evaluation on {checkpoint}...")
+        run_evaluation(
+            checkpoint=checkpoint,
+            model_name=model_name,
+            max_new_tokens=max_new_tokens,
+            output_dir=str(Path(output_dir) / "eval"),
+            seed=seed,
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -79,9 +101,11 @@ if __name__ == "__main__":
     parser.add_argument("--train-ratio", type=float, default=0.9)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--steps", type=int, default=3500)
-    parser.add_argument("--group-size", type=int, default=16)
+    parser.add_argument("--group-size", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--grad-accum", type=int, default=2)
+    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--max-prompt-length", type=int, default=512)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--kl-coeff", type=float, default=0.01)
@@ -100,6 +124,8 @@ if __name__ == "__main__":
         group_size=args.group_size,
         batch_size=args.batch_size,
         gradient_accumulation=args.grad_accum,
+        max_new_tokens=args.max_new_tokens,
+        max_prompt_length=args.max_prompt_length,
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         kl_coeff=args.kl_coeff,

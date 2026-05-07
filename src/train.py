@@ -45,6 +45,7 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
         categories = kwargs.get("category", [None] * len(completions))
         context_conditions = kwargs.get("context_condition", [None] * len(completions))
         unknown_labels = kwargs.get("unknown_label", [None] * len(completions))
+        target_labels = kwargs.get("target_label", [None] * len(completions))
 
         rewards = []
         labels = []
@@ -59,6 +60,8 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
                 result = compute_reward(
                     text=completion,
                     ground_truth_label=label,
+                    context_condition=context_conditions[i] if i < len(context_conditions) else None,
+                    target_label=target_labels[i] if i < len(target_labels) else None,
                     lambda_fair=lambda_fair,
                 )
                 rewards.append(result["r_total"])
@@ -69,12 +72,13 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
         # stays in sync with trainer.global_step rather than a separate counter.
         if callback is not None:
             step = callback.current_step
-            valid = [(c, l, cat, cond, unk)
-                     for c, l, cat, cond, unk
-                     in zip(completions, labels, categories, context_conditions, unknown_labels)
+            valid = [(c, l, cat, cond, unk, tgt)
+                     for c, l, cat, cond, unk, tgt
+                     in zip(completions, labels, categories, context_conditions,
+                            unknown_labels, target_labels)
                      if l != -1]
             if valid:
-                v_completions, v_labels, v_cats, v_conds, v_unks = zip(*valid)
+                v_completions, v_labels, v_cats, v_conds, v_unks, v_tgts = zip(*valid)
                 callback.log_generation_batch(
                     step=step,
                     completions=list(v_completions),
@@ -82,6 +86,7 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
                     categories=list(v_cats),
                     context_conditions=list(v_conds),
                     unknown_labels=list(v_unks),
+                    target_labels=list(v_tgts),
                     lambda_fair=lambda_fair,
                 )
 
@@ -123,6 +128,10 @@ def build_grpo_dataset(split_data, tokenizer) -> tuple[Dataset, dict]:
             "category": example["category"],
             "context_condition": example["context_condition"],
             "unknown_label": example.get("unknown_label", -1),
+            # target_label = BBQ stereotype-aligned answer index (or -1 if absent).
+            # Required by P_stereotype in compute_reward(). The Elfsong/BBQ HF
+            # dataset includes this column natively; .map() preserves it.
+            "target_label": example.get("target_label", -1) if example.get("target_label") is not None else -1,
         })
 
         ground_truth_map[prompt_str] = example["answer_label"]
@@ -334,9 +343,10 @@ def train(
     # ── Train ─────────────────────────────────────────────
     print("\n" + "=" * 50)
     print(f"Starting Fair-RLVR Training")
+    print(f"  Reward: R_total = R_binary - P_structural - λ_fair · P_stereotype")
     print(f"  Model: {model_name}")
     print(f"  Steps: {num_train_steps}")
-    print(f"  λ (fairness): {lambda_fair}")
+    print(f"  λ_fair (stereotype penalty weight): {lambda_fair}")
     print(f"  Group size: {group_size}")
     print(f"  4-bit: {use_4bit}")
     print("=" * 50 + "\n")

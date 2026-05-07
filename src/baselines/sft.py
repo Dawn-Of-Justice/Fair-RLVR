@@ -81,6 +81,7 @@ def train_sft(
     lora_r: int = 16,
     lora_alpha: int = 32,
     max_seq_length: int = 768,
+    max_new_tokens: int = 256,
     output_dir: str = "results/sft",
     device: str = "auto",
     seed: int = 42,
@@ -176,6 +177,7 @@ def train_sft(
         learning_rate=lr,
         bf16=True,
         optim="paged_adamw_8bit",
+        gradient_checkpointing=True,
         logging_steps=10,
         save_strategy="epoch",
         report_to="none",
@@ -218,7 +220,7 @@ def train_sft(
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=512,
+                max_new_tokens=max_new_tokens,
                 do_sample=False,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -257,6 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--output-dir", type=str, default="results/sft")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=42,
@@ -269,6 +272,7 @@ if __name__ == "__main__":
         epochs=args.epochs,
         lr=args.lr,
         batch_size=args.batch_size,
+        max_new_tokens=args.max_new_tokens,
         output_dir=args.output_dir,
         device=args.device,
         seed=args.seed,

@@ -18,8 +18,9 @@ from src.evaluate import evaluate_all
 
 def run_zero_shot(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
+    train_ratio: float = 0.9,
     n_eval: int = None,
-    max_new_tokens: int = 512,
+    max_new_tokens: int = 256,
     batch_size: int = 8,
     output_dir: str = "results/baseline_model",
     device: str = "auto",
@@ -56,7 +57,7 @@ def run_zero_shot(
 
     # ── Load data ──────────────────────────────────────────
     print("Loading BBQ dataset (10% eval split)...")
-    splits = create_splits(train_ratio=0.9, seed=seed)
+    splits = create_splits(train_ratio=train_ratio, seed=seed)
     eval_ds = splits["eval"]
 
     if n_eval is not None:
@@ -138,9 +139,11 @@ def run_zero_shot(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run zero-shot baseline on BBQ")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
+    parser.add_argument("--train-ratio", type=float, default=0.9,
+                        help="Must match the ratio used during training to get the same eval split")
     parser.add_argument("--n-eval", type=int, default=None,
                         help="Max eval samples (default: full 10%% split)")
-    parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--output-dir", type=str, default="results/baseline_model")
     parser.add_argument("--device", type=str, default="auto")
@@ -150,6 +153,7 @@ if __name__ == "__main__":
 
     run_zero_shot(
         model_name=args.model,
+        train_ratio=args.train_ratio,
         n_eval=args.n_eval,
         max_new_tokens=args.max_tokens,
         batch_size=args.batch_size,
