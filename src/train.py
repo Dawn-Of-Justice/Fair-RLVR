@@ -158,6 +158,7 @@ def train(
     clip_ratio_high: float = 0.28,
     clip_ratio_low: float = 0.20,
     use_4bit: bool = True,
+    gradient_checkpointing: bool = True,
     output_dir: str = "results/fair_rlvr",
     save_steps: int = 500,
     logging_steps: int = 10,
@@ -183,6 +184,9 @@ def train(
         clip_ratio_high: DAPO high clip ratio
         clip_ratio_low: DAPO low clip ratio
         use_4bit: use 4-bit quantization
+        gradient_checkpointing: trade compute for VRAM by recomputing activations
+            during backward (default True). Set False for ~30% speedup when VRAM
+            is not the bottleneck.
         output_dir: directory to save model and results
         save_steps: save checkpoint every N steps
         logging_steps: log every N steps
@@ -218,6 +222,7 @@ def train(
         "clip_ratio_high": clip_ratio_high,
         "clip_ratio_low": clip_ratio_low,
         "use_4bit": use_4bit,
+        "gradient_checkpointing": gradient_checkpointing,
         "seed": seed,
         "dry_run": dry_run,
     }
@@ -313,8 +318,8 @@ def train(
         seed=seed,
         report_to="none",
         remove_unused_columns=False,
-        # Gradient checkpointing for memory efficiency
-        gradient_checkpointing=True,
+        # Gradient checkpointing for memory efficiency (toggle via --no-grad-checkpoint)
+        gradient_checkpointing=gradient_checkpointing,
         # Optimizer: paged_adamw_8bit stores optimizer states in 8-bit and
         # pages them to CPU when VRAM is tight — a good match for 4-bit weights.
         optim="paged_adamw_8bit",
@@ -338,6 +343,7 @@ def train(
     )
 
     # ── Train ─────────────────────────────────────────────
+    effective_batch = batch_size * gradient_accumulation
     print("\n" + "=" * 50)
     print(f"Starting Fair-RLVR Training")
     print(f"  Reward: R_total = λ · R_fairness - P_structural")
@@ -345,7 +351,9 @@ def train(
     print(f"  Steps: {num_train_steps}")
     print(f"  λ (fairness reward weight): {lambda_fair}")
     print(f"  Group size: {group_size}")
-    print(f"  4-bit: {use_4bit}")
+    print(f"  Micro-batch: {batch_size}, grad-accum: {gradient_accumulation}, "
+          f"effective batch: {effective_batch}")
+    print(f"  4-bit: {use_4bit} | grad-checkpoint: {'on' if gradient_checkpointing else 'off'}")
     print("=" * 50 + "\n")
 
     trainer.train()
@@ -384,6 +392,8 @@ if __name__ == "__main__":
     # Model
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--no-4bit", action="store_true", help="Disable 4-bit quantization")
+    parser.add_argument("--no-grad-checkpoint", action="store_true",
+                        help="Disable gradient checkpointing. Faster (~30%%) but uses more VRAM")
 
     # Data
     parser.add_argument("--train-ratio", type=float, default=None,
@@ -444,6 +454,7 @@ if __name__ == "__main__":
         "lora_alpha": _resolve(args.lora_alpha, "lora_alpha", 32),
         "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),
         "use_4bit": not args.no_4bit,
+        "gradient_checkpointing": not args.no_grad_checkpoint,
         "output_dir": _resolve(args.output_dir, "output_dir", "results/fair_rlvr"),
         "save_steps": _resolve(args.save_steps, "save_steps", 500),
         "seed": _resolve(args.seed, "seed", 42),

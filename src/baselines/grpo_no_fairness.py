@@ -39,6 +39,7 @@ def run_grpo_no_fairness(
     lora_alpha: int = 32,
     kl_coeff: float = 0.01,
     use_4bit: bool = True,
+    gradient_checkpointing: bool = True,
     output_dir: str = "results/grpo_no_fairness",
     save_steps: int = 500,
     seed: int = 42,
@@ -71,6 +72,7 @@ def run_grpo_no_fairness(
         lora_alpha=lora_alpha,
         kl_coeff=kl_coeff,
         use_4bit=use_4bit,
+        gradient_checkpointing=gradient_checkpointing,
         output_dir=output_dir,
         save_steps=save_steps,
         seed=seed,
@@ -111,6 +113,8 @@ if __name__ == "__main__":
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--kl-coeff", type=float, default=0.01)
     parser.add_argument("--no-4bit", action="store_true")
+    parser.add_argument("--no-grad-checkpoint", action="store_true",
+                        help="Disable gradient checkpointing. Faster (~30%%) but uses more VRAM")
     parser.add_argument("--output-dir", type=str, default="results/grpo_no_fairness")
     parser.add_argument("--save-steps", type=int, default=500)
     parser.add_argument("--seed", type=int, default=42)
@@ -131,6 +135,7 @@ if __name__ == "__main__":
         lora_alpha=args.lora_alpha,
         kl_coeff=args.kl_coeff,
         use_4bit=not args.no_4bit,
+        gradient_checkpointing=not args.no_grad_checkpoint,
         output_dir=args.output_dir,
         save_steps=args.save_steps,
         seed=args.seed,
