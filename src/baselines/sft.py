@@ -79,6 +79,7 @@ def train_sft(
     batch_size: int = 4,
     gradient_accumulation: int = 4,
     eval_batch_size: int = 8,
+    gradient_checkpointing: bool = True,
     lora_r: int = 16,
     lora_alpha: int = 32,
     max_seq_length: int = 768,
@@ -180,13 +181,20 @@ def train_sft(
         learning_rate=lr,
         bf16=True,
         optim="paged_adamw_8bit",
-        gradient_checkpointing=True,
+        gradient_checkpointing=gradient_checkpointing,
         logging_steps=10,
         save_strategy="epoch",
         report_to="none",
         remove_unused_columns=False,
         dataloader_num_workers=4,
         dataloader_pin_memory=True,
+    )
+
+    effective_batch = batch_size * gradient_accumulation
+    print(
+        f"Training: micro-batch={batch_size}, grad-accum={gradient_accumulation}, "
+        f"effective batch={effective_batch}, "
+        f"grad-checkpoint={'on' if gradient_checkpointing else 'off'}"
     )
 
     trainer = Trainer(
@@ -278,7 +286,12 @@ if __name__ == "__main__":
     parser.add_argument("--train-ratio", type=float, default=0.9)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=2e-5)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=4,
+                        help="Per-device training micro-batch size")
+    parser.add_argument("--grad-accum", type=int, default=4,
+                        help="Gradient accumulation steps. Effective batch = batch-size * grad-accum")
+    parser.add_argument("--no-grad-checkpoint", action="store_true",
+                        help="Disable gradient checkpointing. Faster (~30%%) but uses more VRAM")
     parser.add_argument("--eval-batch-size", type=int, default=8,
                         help="Real GPU batch size for post-training eval (no gradients)")
     parser.add_argument("--max-new-tokens", type=int, default=256)
@@ -294,7 +307,9 @@ if __name__ == "__main__":
         epochs=args.epochs,
         lr=args.lr,
         batch_size=args.batch_size,
+        gradient_accumulation=args.grad_accum,
         eval_batch_size=args.eval_batch_size,
+        gradient_checkpointing=not args.no_grad_checkpoint,
         max_new_tokens=args.max_new_tokens,
         output_dir=args.output_dir,
         device=args.device,
