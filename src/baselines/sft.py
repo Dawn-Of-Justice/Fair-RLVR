@@ -78,6 +78,7 @@ def train_sft(
     lr: float = 2e-5,
     batch_size: int = 4,
     gradient_accumulation: int = 4,
+    eval_batch_size: int = 8,
     lora_r: int = 16,
     lora_alpha: int = 32,
     max_seq_length: int = 768,
@@ -110,6 +111,8 @@ def train_sft(
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # The HF Trainer needs right-padding for SFT loss masking; we'll switch to
+    # left-padding for the post-training generation loop just before eval.
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -200,22 +203,36 @@ def train_sft(
     tokenizer.save_pretrained(str(output_path / "adapter"))
     print(f"Adapter saved to {output_path / 'adapter'}")
 
-    # ── Evaluate ───────────────────────────────────────────
+    # ── Evaluate (real batched generation) ────────────────
     print("\nRunning evaluation...")
     model.eval()
+    # Switch to left padding for generation; right padding is only correct for
+    # the SFT training loss above.
+    tokenizer.padding_side = "left"
 
     eval_data = [splits["eval"][i] for i in range(len(splits["eval"]))]
 
-    predictions = []
-    for example in tqdm(eval_data, desc="Evaluating"):
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": example["prompt"]},
-        ]
-        prompt_text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+    prompt_texts = [
+        tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": example["prompt"]},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
         )
-        inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+        for example in eval_data
+    ]
+
+    generated_outputs = []
+    for i in tqdm(range(0, len(eval_data), eval_batch_size), desc="Evaluating"):
+        batch_prompts = prompt_texts[i : i + eval_batch_size]
+        inputs = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(model.device)
 
         with torch.no_grad():
             outputs = model.generate(
@@ -225,12 +242,14 @@ def train_sft(
                 pad_token_id=tokenizer.pad_token_id,
             )
 
-        generated = tokenizer.decode(
-            outputs[0][inputs["input_ids"].shape[1] :],
-            skip_special_tokens=True,
+        input_len = inputs["input_ids"].shape[1]
+        decoded = tokenizer.batch_decode(
+            outputs[:, input_len:], skip_special_tokens=True
         )
+        generated_outputs.extend(decoded)
 
-        predictions.append({
+    predictions = [
+        {
             "model_output": generated,
             "answer_label": example["answer_label"],
             "context_condition": example["context_condition"],
@@ -238,7 +257,9 @@ def train_sft(
             "prompt": example["prompt"],
             "target_label": example.get("target_label"),
             "unknown_label": example.get("unknown_label", -1),
-        })
+        }
+        for example, generated in zip(eval_data, generated_outputs)
+    ]
 
     results = evaluate_all(
         predictions,
@@ -258,6 +279,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--eval-batch-size", type=int, default=8,
+                        help="Real GPU batch size for post-training eval (no gradients)")
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--output-dir", type=str, default="results/sft")
     parser.add_argument("--device", type=str, default="auto")
@@ -271,6 +294,7 @@ if __name__ == "__main__":
         epochs=args.epochs,
         lr=args.lr,
         batch_size=args.batch_size,
+        eval_batch_size=args.eval_batch_size,
         max_new_tokens=args.max_new_tokens,
         output_dir=args.output_dir,
         device=args.device,

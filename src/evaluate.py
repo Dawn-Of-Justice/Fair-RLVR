@@ -519,6 +519,7 @@ def run_evaluation(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
     n_eval: int = None,
     max_new_tokens: int = 512,
+    batch_size: int = 8,
     output_dir: str = "results/eval",
     run_faithfulness: bool = False,
     device: str = "auto",
@@ -532,6 +533,7 @@ def run_evaluation(
         model_name: base model name
         n_eval: max eval samples to run (None = use full 10% split, ~5,849 samples)
         max_new_tokens: max tokens for generation
+        batch_size: number of prompts per generate() call (real GPU batching)
         output_dir: directory to save results
         run_faithfulness: whether to run the faithfulness test (Experiment 4)
         device: device to use
@@ -550,6 +552,9 @@ def run_evaluation(
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Decoder-only causal LMs must left-pad during generation so all prompts
+    # end at the same position and generated tokens align across the batch.
+    tokenizer.padding_side = "left"
 
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -577,20 +582,30 @@ def run_evaluation(
           f"(ambig: {sum(1 for e in eval_data if e['context_condition'] == 'ambig')}, "
           f"disambig: {sum(1 for e in eval_data if e['context_condition'] == 'disambig')})")
 
-    # ── Run inference ─────────────────────────────────────
+    # ── Run inference (real batched generation) ───────────
     print("Running inference...")
-    predictions = []
 
-    for example in tqdm(eval_data, desc="Evaluating"):
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": example["prompt"]},
-        ]
-
-        prompt_text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+    prompt_texts = [
+        tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": example["prompt"]},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
         )
-        inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+        for example in eval_data
+    ]
+
+    generated_outputs = []
+    for i in tqdm(range(0, len(eval_data), batch_size), desc="Evaluating"):
+        batch_prompts = prompt_texts[i : i + batch_size]
+        inputs = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(model.device)
 
         with torch.no_grad():
             outputs = model.generate(
@@ -600,12 +615,15 @@ def run_evaluation(
                 pad_token_id=tokenizer.pad_token_id,
             )
 
-        generated = tokenizer.decode(
-            outputs[0][inputs["input_ids"].shape[1]:],
-            skip_special_tokens=True,
+        # Left padding means every row's prompt ends at column input_len.
+        input_len = inputs["input_ids"].shape[1]
+        decoded = tokenizer.batch_decode(
+            outputs[:, input_len:], skip_special_tokens=True
         )
+        generated_outputs.extend(decoded)
 
-        predictions.append({
+    predictions = [
+        {
             "model_output": generated,
             "answer_label": example["answer_label"],
             "context_condition": example["context_condition"],
@@ -613,7 +631,9 @@ def run_evaluation(
             "target_label": example.get("target_label"),
             "unknown_label": example.get("unknown_label", -1),
             "prompt": example["prompt"],
-        })
+        }
+        for example, generated in zip(eval_data, generated_outputs)
+    ]
 
     # ── Evaluate ──────────────────────────────────────────
     results = evaluate_all(
@@ -657,6 +677,8 @@ if __name__ == "__main__":
                         help="Max eval samples to use (default: full 10%% split, ~5,849 samples). "
                              "Pass a small number (e.g. 200) for quick iteration.")
     parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=8,
+                        help="Real GPU batch size for inference")
     parser.add_argument("--output-dir", type=str, default=None,
                         help="Output directory (defaults to checkpoint parent dir)")
     parser.add_argument("--run-faithfulness", action="store_true",
@@ -675,6 +697,7 @@ if __name__ == "__main__":
         model_name=args.model,
         n_eval=args.n_eval,
         max_new_tokens=args.max_tokens,
+        batch_size=args.batch_size,
         output_dir=args.output_dir,
         run_faithfulness=args.run_faithfulness,
         device=args.device,

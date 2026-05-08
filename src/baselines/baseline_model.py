@@ -45,6 +45,9 @@ def run_zero_shot(
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Decoder-only causal LMs must left-pad during generation so all prompts
+    # end at the same position and generated tokens align across the batch.
+    tokenizer.padding_side = "left"
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -66,49 +69,59 @@ def run_zero_shot(
     eval_data = [eval_ds[i] for i in range(len(eval_ds))]
     print(f"Eval samples: {len(eval_data)}")
 
-    # ── Run inference ──────────────────────────────────────
+    # ── Run inference (real batched generation) ────────────
     print("Running zero-shot inference...")
-    predictions = []
 
-    for i in tqdm(range(0, len(eval_data), batch_size), desc="Evaluating"):
-        batch = eval_data[i : i + batch_size]
-
-        for example in batch:
-            # Build chat messages
-            messages = [
+    # Pre-format every prompt once so the batched loop is just tokenize+generate.
+    prompt_texts = [
+        tokenizer.apply_chat_template(
+            [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": example["prompt"]},
-            ]
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        for example in eval_data
+    ]
 
-            # Apply chat template
-            prompt_text = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
+    generated_outputs = []
+    for i in tqdm(range(0, len(eval_data), batch_size), desc="Evaluating"):
+        batch_prompts = prompt_texts[i : i + batch_size]
+        inputs = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(model.device)
+
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
             )
-            inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
 
-            with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
+        # Left padding means every row's prompt ends at column input_len.
+        input_len = inputs["input_ids"].shape[1]
+        decoded = tokenizer.batch_decode(
+            outputs[:, input_len:], skip_special_tokens=True
+        )
+        generated_outputs.extend(decoded)
 
-            # Decode only generated tokens
-            generated = tokenizer.decode(
-                outputs[0][inputs["input_ids"].shape[1] :],
-                skip_special_tokens=True,
-            )
-
-            predictions.append({
-                "model_output": generated,
-                "answer_label": example["answer_label"],
-                "context_condition": example["context_condition"],
-                "category": example["category"],
-                "prompt": example["prompt"],
-                "target_label": example.get("target_label"),
-                "unknown_label": example.get("unknown_label", -1),
-            })
+    predictions = [
+        {
+            "model_output": generated,
+            "answer_label": example["answer_label"],
+            "context_condition": example["context_condition"],
+            "category": example["category"],
+            "prompt": example["prompt"],
+            "target_label": example.get("target_label"),
+            "unknown_label": example.get("unknown_label", -1),
+        }
+        for example, generated in zip(eval_data, generated_outputs)
+    ]
 
     # ── Evaluate ───────────────────────────────────────────
     results = evaluate_all(
