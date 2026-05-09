@@ -416,7 +416,7 @@ def train(
     effective_batch = batch_size * gradient_accumulation
     print("\n" + "=" * 50)
     print(f"Starting Fair-RLVR Training")
-    print(f"  Reward: R_total = λ · R_fairness - P_structural")
+    print(f"  Reward: R_total = λ · R_fairness + α · R_consistency - P_structural")
     print(f"  Model: {model_name}")
     print(f"  Steps: {num_train_steps}")
     print(f"  λ (fairness reward weight): {lambda_fair}")

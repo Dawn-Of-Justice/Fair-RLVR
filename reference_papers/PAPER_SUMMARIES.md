@@ -534,7 +534,7 @@ This paper directly extends Med-RLVR by addressing the reward hacking behaviors 
 
 ### Relevance to Fair-RLVR
 
-This is the most direct inspiration for Fair-RLVR's reward function. Fair-RLVR adapts the composite reward idea but simplifies it: it drops the binary R_correctness (since it becomes redundant once format is learned) and the Sentence-BERT penalty (inappropriate for single-letter MCQA answers), keeping only λ·R_fairness - P_structural. The P_structural in Fair-RLVR checks the same three conditions: answer leaked in think, reasoning too short, content outside tags.
+This is the most direct inspiration for Fair-RLVR's reward function. Fair-RLVR adapts the composite reward idea: it drops the binary R_correctness (since it becomes redundant once format is learned) and the Sentence-BERT penalty (inappropriate for single-letter MCQA answers), and adds a counterfactual-consistency bonus from Ravulu et al. 2024 (paper #15). The current form is `λ·R_fairness + α·R_consistency - P_structural`. The P_structural in Fair-RLVR checks the same three conditions: answer leaked in think, reasoning too short, content outside tags.
 
 ### Future Directions
 

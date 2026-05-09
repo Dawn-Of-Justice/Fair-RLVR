@@ -4,7 +4,7 @@
 | Step | Task | Status |
 |---|---|---|
 | 1.1 | `src/data.py` — BBQ loading, 90/10 split, `unknown_label` field | ✅ Done |
-| 1.2 | `src/reward.py` — Composite reward: `λ·R_fairness - P_structural` | ✅ Done |
+| 1.2 | `src/reward.py` — Composite reward: `λ·R_fairness + α·R_consistency - P_structural` | ✅ Done |
 | 1.3 | `src/evaluate.py` — BBQ accuracy, bias score, abstention rate (index-based, not string heuristic) | ✅ Done |
 | 1.4 | `src/baselines/baseline_model.py` — Zero-shot Qwen2.5-3B on BBQ (renamed from zero_shot.py) | ✅ Done |
 | 1.5 | `src/baselines/sft.py` — Supervised fine-tune on BBQ answers | ✅ Done |
@@ -40,16 +40,16 @@
 | 4.1 | Fill in results tables in `main.tex` | ⬜ |
 | 4.2 | Generate training dynamics plots (reward curves, bias score over steps) | ⬜ |
 | 4.3 | Cherry-pick CoT examples showing emergent de-biasing reasoning | ⬜ |
-| 4.4 | Update paper equation: `R_total = λ·R_fairness - P_structural` (remove R_correctness, P_leak) | ⬜ |
+| 4.4 | Update paper equation: `R_total = λ·R_fairness + α·R_consistency - P_structural` (remove R_correctness, P_leak; add R_consistency from Ravulu 2024) | ⬜ |
 | 4.5 | Write analysis + limitations with real numbers | ⬜ |
 | 4.6 | Final paper review + submit | ⬜ |
 
 ## Key Architectural Decisions Made
 | Decision | Choice | Rationale |
 |---|---|---|
-| Reward equation | `λ·R_fairness - P_structural` | R_correctness redundant post-format; P_leak not meaningful for single-letter MCQA |
+| Reward equation | `λ·R_fairness + α·R_consistency - P_structural` | R_correctness redundant post-format; P_leak not meaningful for single-letter MCQA; R_consistency added per Ravulu 2024 (counterfactual sibling agreement, off in lambda sweep at α=0, on in fair_rlvr.yaml at α=0.25) |
 | Training samples | 52,643 (full 90%) | More signal, proper generalization vs ~1K Med-RLVR style |
-| GRPO group size | G=16 | Higher variance within group → more stable advantage normalization |
+| GRPO group size | G=2 | For 3-choice MCQA reward variance comes from answer correctness; G=2 gives a usable baseline at ~4× lower generation cost than G=8 |
 | Training steps | 3,500 | Enough for full reward dynamics curve; saves at 500-step intervals |
 | λ=0 baseline | `grpo_no_fairness.py` | Directly tests whether fairness reward drives debiasing, not just GRPO structure |
 | Abstention metric | Index comparison via `unknown_label` | String heuristic always returned 0% (model outputs "(a)" not "unknown") |

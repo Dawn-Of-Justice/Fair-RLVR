@@ -272,7 +272,7 @@ def reward_fn(
     """
     Batch reward function compatible with trl.GRPOTrainer.
     context_conditions and target_labels are accepted for API compatibility
-    but are not used in the R_total = λ · R_fairness - P_structural formula.
+    but are not used in the R_total = λ · R_fairness + α · R_consistency - P_structural formula.
     """
     rewards = []
     for text, label in zip(completions, ground_truth_labels):

@@ -14,17 +14,19 @@ Apply RLVR (Reinforcement Learning from Verifiable Rewards) — the same method 
 
 ## Reward Function (current, implemented)
 ```
-R_total = λ · R_fairness - P_structural
+R_total = λ · R_fairness + α · R_consistency - P_structural
 ```
 - **R_fairness:** BBQ ground truth label match (+1 / 0)
+- **R_consistency:** Counterfactual-consistency bonus (+1 / 0). Fires when the predicted answer TEXT (option content, not the (a)/(b)/(c) index) matches an in-batch sibling from the same BBQ template family but a different demographic fill. Off by default (α=0); set α=0.25 in `configs/fair_rlvr.yaml`.
 - **P_structural:** Structural penalties for format violations (0.3 each): answer leaked in think, think too short (<20 tokens), content outside tags
 - **λ:** Fairness signal weight (default 0.5, ablated over {0.1, 0.3, 0.5, 0.7, 1.0})
+- **α:** Consistency bonus weight (default 0.0; 0.25 in `fair_rlvr.yaml`)
 
-> Earlier design had 4 components (R_correctness, R_fairness, P_structural, P_leak). R_correctness was removed (redundant with P_structural; zeros out in GRPO group). P_leak (Sentence-BERT similarity) was removed (single-letter MCQA answers never exceed the cosine similarity threshold τ=0.85).
+> Earlier design had 4 components (R_correctness, R_fairness, P_structural, P_leak). R_correctness was removed (redundant with P_structural; zeros out in GRPO group). P_leak (Sentence-BERT similarity) was removed (single-letter MCQA answers never exceed the cosine similarity threshold τ=0.85). R_consistency was later added based on Ravulu et al. (IEEE AIxDKE 2024) — their Counterfactual Data Augmentation idea adapted to RLVR.
 
 ## Technical Stack (implemented)
 - **Model:** Qwen2.5-3B-Instruct
-- **Training:** GRPO (G=16) + LoRA (r=16, α=32) via TRL's GRPOTrainer
+- **Training:** GRPO (G=2) + LoRA (r=16, α=32) via TRL's GRPOTrainer
 - **Quantization:** 4-bit (bitsandbytes nf4) during training; float16 at eval
 - **DAPO fixes:** Asymmetric clipping (ε_high=0.28, ε_low=0.20)
 - **Dataset:** Full BBQ — 52,643 training samples (90%), 5,849 eval samples (10%), seed=42

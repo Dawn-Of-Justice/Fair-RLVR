@@ -9,16 +9,18 @@ The model is trained to **reason through bias** in its chain-of-thought before a
 ## Key Idea
 
 ```
-R_total = λ · R_fairness - P_structural
+R_total = λ · R_fairness + α · R_consistency - P_structural
 ```
 
 | Component | What it does |
 |---|---|
 | `R_fairness` | Rewards matching BBQ ground-truth label (+1.0 / 0) |
+| `R_consistency` | Counterfactual-consistency bonus: +1.0 if predicted answer text matches an in-batch sibling from the same BBQ template family but a different demographic fill (Ravulu et al. 2024 CDA, RLVR-adapted) |
 | `P_structural` | Penalizes format violations: answer leaked in `<think>`, reasoning < 20 tokens, content outside tags, missing `<answer>` tag (0.3 each, max 1.2) |
 | `λ` | Fairness signal weight — default 0.5, ablated across {0.1, 0.3, 0.5, 0.7, 1.0} |
+| `α` | Consistency bonus weight — default 0.0 (off in the lambda sweep), 0.25 in `fair_rlvr.yaml` |
 
-Reward range: `[−1.2, 0.5]` at λ=0.5. `R_correctness` and `P_leak` (Sentence-BERT) were removed from an earlier 4-component design — both were found to be redundant for single-letter MCQA (see [docs/adr_fair_rlvr.md](docs/adr_fair_rlvr.md)).
+Reward range: `[−1.2, λ + α]` → at λ=0.5, α=0.25: `[−1.2, 0.75]`. `R_correctness` and `P_leak` (Sentence-BERT) were removed from an earlier 4-component design — both were redundant for single-letter MCQA (see [docs/adr_fair_rlvr.md](docs/adr_fair_rlvr.md)). `R_consistency` was added based on Ravulu et al. (IEEE AIxDKE 2024).
 
 ## Why Not Just RLHF?
 

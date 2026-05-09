@@ -10,7 +10,7 @@ type: project
 - **Baseline 1 (zero-shot):** Qwen2.5-3B-Instruct, no training (`src/baselines/baseline_model.py`)
 - **Baseline 2 (SFT):** Qwen2.5-3B-Instruct + supervised fine-tune on BBQ answers (`src/baselines/sft.py`)
 - **Baseline 3 (GRPO λ=0):** Qwen2.5-3B-Instruct + GRPO with no fairness reward — `R_total = -P_structural` only (`src/baselines/grpo_no_fairness.py`)
-- **Ours (Fair-RLVR):** Qwen2.5-3B-Instruct + GRPO + `R_total = 0.5·R_fairness - P_structural`
+- **Ours (Fair-RLVR):** Qwen2.5-3B-Instruct + GRPO + `R_total = 0.5·R_fairness + 0.25·R_consistency - P_structural` (configs/fair_rlvr.yaml). The lambda sweep (Exp 2) keeps α=0 to isolate the λ effect; only the headline run uses the consistency bonus.
 
 > ⚠️ "GRPO correctness-only" baseline was removed. It was replaced by the λ=0 ablation, which directly tests the same scientific question (does fairness reward matter?) without depending on the now-removed R_correctness component.
 

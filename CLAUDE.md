@@ -7,10 +7,10 @@ This file provides guidance to Claude Code when working with code in this reposi
 Fair-RLVR applies Reinforcement Learning from Verifiable Rewards (RLVR) to **fairness alignment** using the BBQ benchmark as an automated fairness verifier. The model (Qwen2.5-3B-Instruct + LoRA) is trained via GRPO with a simplified two-component composite reward:
 
 ```
-R_total = λ · R_fairness - P_structural
+R_total = λ · R_fairness + α · R_consistency - P_structural
 ```
 
-The model must generate outputs in `<think>...</think><answer>(a/b/c)</answer>` format. R_correctness and P_leak were removed from the original 4-component design — see Key Design Decisions for rationale.
+The model must generate outputs in `<think>...</think><answer>(a/b/c)</answer>` format. R_correctness and P_leak were removed from the original 4-component design; R_consistency was added as a counterfactual-consistency bonus (Ravulu et al. 2024 CDA, RLVR-adapted) — see Key Design Decisions for rationale. α defaults to 0 (off) in the lambda sweep and 0.25 in the main `fair_rlvr.yaml` run.
 
 ## Commands
 

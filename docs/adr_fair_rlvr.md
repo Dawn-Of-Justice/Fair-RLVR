@@ -22,11 +22,11 @@ decisions and rationale for each, following full implementation and pre-training
 
 ---
 
-## Decision 1: Reward Function — Simplified Two-Component Formula
+## Decision 1: Reward Function — Three-Component Formula
 
 ### Decision
 ```
-R_total = λ · R_fairness - P_structural
+R_total = λ · R_fairness + α · R_consistency - P_structural
 ```
 
 ### Options Considered
@@ -34,6 +34,7 @@ R_total = λ · R_fairness - P_structural
 | Component | Keep? | Rationale |
 |---|---|---|
 | `R_fairness` | ✅ | Core signal — BBQ ground truth match |
+| `R_consistency` | ✅ (α=0 by default) | Counterfactual-consistency bonus across in-batch demographic-swap siblings (Ravulu et al. 2024 CDA, RLVR-adapted). Compares predicted answer TEXT, not (a)/(b)/(c) index. Off in the lambda sweep so the only varying reward component is λ; on (α=0.25) in `fair_rlvr.yaml` for the main run. |
 | `P_structural` | ✅ | Actively penalizes format violations; fires on short think, leaks, outside-tag content |
 | `R_correctness` | ❌ | Redundant: format violations already covered by P_structural. Zeros out in GRPO group normalization once format is stable. |
 | `P_leak` (Sentence-BERT cosine sim) | ❌ | Never activates: single-letter MCQA answers `(a)/(b)/(c)` have near-zero cosine similarity with multi-sentence reasoning chains. τ=0.85 is never reached. Including it would claim anti-hacking behavior that doesn't occur. |
