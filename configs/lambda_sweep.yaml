@@ -13,11 +13,14 @@ train_ratio: 0.9
 
 # Reward — lambda overridden via CLI
 lambda_fair: 0.5
+# Lambda sweep keeps the consistency bonus OFF so the only varying reward
+# component is λ. Set --alpha-consistency on the CLI for combined runs.
+alpha_consistency: 0.0
 
 # Training — identical to main experiment for fair comparison
 learning_rate: 1.0e-5
 num_train_steps: 3500
-group_size: 8
+group_size: 2
 batch_size: 8
 gradient_accumulation: 2
 max_new_tokens: 256

@@ -1,12 +1,21 @@
 """
 Composite Reward Function for Fair-RLVR
 
-R_total = λ · R_fairness - P_structural
+R_total = λ · R_fairness + α · R_consistency - P_structural
 
 Components:
 - R_fairness:    binary correctness reward
                    +1.0 if predicted answer matches BBQ ground truth label
                     0.0 otherwise (wrong answer or unparseable format)
+
+- R_consistency: counterfactual-consistency bonus (Ravulu et al. 2024 CDA, adapted to RLVR)
+                   +1.0 if the predicted ANSWER TEXT (e.g. "the grandfather") matches
+                        any in-batch sibling's predicted answer text from the same
+                        BBQ template family (same category/question_index/condition,
+                        different demographic fill).
+                    0.0 if no sibling in the batch or no agreement.
+                 Compares answer text (option content), NOT the answer index, since
+                 demographic-swap variants permute the (a)/(b)/(c) order.
 
 - P_structural:  rule-based structural violation penalty (4 violations × 0.3, max 1.2)
                  1) think block missing or < min_think_tokens tokens
@@ -14,20 +23,24 @@ Components:
                  3) answer leak inside <think> block
                  4) content outside designated tags
 
-The reward weight:
+The reward weights:
 - λ scales the fairness signal — the lever for the lambda sweep.
+- α scales the counterfactual-consistency bonus (default 0.25).
 - P_structural is unweighted (coefficient fixed at 1.0).
-- Reward range: [−1.2, λ] → at λ=0.5: [−1.2, 0.5]
+- Reward range: [−1.2, λ + α] → at λ=0.5, α=0.25: [−1.2, 0.75]
 
 References:
 - Tarek et al., "Reward Hacking Mitigation using Verifiable Composite Rewards"
   (arXiv:2509.15557, 2025) — composite penalty design (P_structural).
 - Parrish et al., "BBQ: A Hand-Built Bias Benchmark for Question Answering"
   (ACL 2022) — BBQ ground truth labels used by R_fairness.
+- Ravulu et al., "Mitigating Bias in RLHF for Large Language Models"
+  (IEEE AIxDKE 2024) — counterfactual data augmentation; the consistency
+  bonus here is its RLVR analog.
 """
 
 import re
-from typing import Optional
+from typing import Optional, Sequence
 
 
 # ── Answer Extraction ───────────────────────────────────────
@@ -98,6 +111,53 @@ def reward_fairness(text: str, ground_truth_label: int) -> float:
     return 0.0
 
 
+def predicted_answer_text(text: str, options: Sequence[str]) -> Optional[str]:
+    """
+    Map a model output to the actual answer-option text (e.g. "the grandfather"),
+    not the (a)/(b)/(c) index. This is the canonical form for counterfactual
+    consistency comparisons across demographic-swap variants where (a)/(b)/(c)
+    may be permuted.
+
+    Args:
+        text: full model output containing <answer>(x)</answer>
+        options: the three answer-option strings (ans0, ans1, ans2)
+
+    Returns the lowercased option text, or None if unparseable.
+    """
+    idx = answer_to_index(extract_answer(text))
+    if idx == -1 or idx >= len(options):
+        return None
+    opt = options[idx]
+    return opt.strip().lower() if opt else None
+
+
+def reward_consistency(
+    text: str,
+    options: Sequence[str],
+    sibling_answer_texts: Sequence[Optional[str]],
+) -> float:
+    """
+    R_consistency: counterfactual-consistency bonus.
+
+    Returns +1.0 if the predicted answer TEXT matches any non-None sibling
+    answer text — i.e. the model gave the same semantic answer on a
+    demographic-swap variant of the same BBQ template family. 0.0 otherwise.
+
+    No bonus is given when:
+      - the current prediction is unparseable (idx == -1)
+      - no siblings are present in the batch (sibling_answer_texts empty/all None)
+
+    The bonus is binary; the caller scales by α.
+    """
+    own = predicted_answer_text(text, options)
+    if own is None:
+        return 0.0
+    for sib in sibling_answer_texts:
+        if sib is not None and sib == own:
+            return 1.0
+    return 0.0
+
+
 def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
     """
     P_structural: Rule-based structural violation penalty.
@@ -152,11 +212,14 @@ def compute_reward(
     context_condition: Optional[str] = None,
     target_label: Optional[int] = None,
     lambda_fair: float = 0.5,
+    alpha_consistency: float = 0.0,
+    options: Optional[Sequence[str]] = None,
+    sibling_answer_texts: Optional[Sequence[Optional[str]]] = None,
     min_think_tokens: int = 20,
 ) -> dict:
     """
     Compute composite reward:
-        R_total = λ · R_fairness - P_structural
+        R_total = λ · R_fairness + α · R_consistency - P_structural
 
     Args:
         text: Full model output (including <think> and <answer> tags)
@@ -165,22 +228,36 @@ def compute_reward(
         target_label: unused — kept for API compatibility with GRPOTrainer
         lambda_fair: Weight for the fairness reward (default 0.5).
                      Lambda sweep varies this. λ=0 → format-only training.
+        alpha_consistency: Weight for the counterfactual-consistency bonus
+                     (default 0.0 — disabled). Set >0 (e.g. 0.25) and pass
+                     `options` + `sibling_answer_texts` to enable.
+        options: the three answer-option strings (ans0, ans1, ans2) for the
+                     current prompt. Required when alpha_consistency > 0.
+        sibling_answer_texts: list of in-batch sibling predicted answer texts
+                     (lowercased option strings); pass [] when no siblings.
         min_think_tokens: Minimum token count in <think> block (default 20)
 
     Returns:
         Dict with all components and the total reward:
           - r_total       : final combined reward
           - r_fairness    : binary correctness reward (0.0 or +1.0)
+          - r_consistency : counterfactual-consistency bonus (0.0 or +1.0)
           - p_structural  : structural violation penalty (0.0 to 1.2)
     """
     r_fair = reward_fairness(text, ground_truth_label)
     p_struct = penalty_structural(text, min_think_tokens)
 
-    r_total = lambda_fair * r_fair - p_struct
+    if alpha_consistency > 0 and options is not None and sibling_answer_texts:
+        r_cons = reward_consistency(text, options, sibling_answer_texts)
+    else:
+        r_cons = 0.0
+
+    r_total = lambda_fair * r_fair + alpha_consistency * r_cons - p_struct
 
     return {
         "r_total": r_total,
         "r_fairness": r_fair,
+        "r_consistency": r_cons,
         "p_structural": p_struct,
     }
 

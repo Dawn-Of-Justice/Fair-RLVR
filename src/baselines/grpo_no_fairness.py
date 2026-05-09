@@ -30,7 +30,7 @@ def run_grpo_no_fairness(
     train_ratio: float = 0.9,
     learning_rate: float = 1e-5,
     num_train_steps: int = 3500,
-    group_size: int = 8,
+    group_size: int = 2,
     batch_size: int = 8,
     gradient_accumulation: int = 2,
     max_new_tokens: int = 256,
@@ -62,6 +62,7 @@ def run_grpo_no_fairness(
         model_name=model_name,
         train_ratio=train_ratio,
         lambda_fair=0.0,          # ← the only difference from Fair-RLVR
+        alpha_consistency=0.0,    # consistency reward off — keeps the ablation pure
         learning_rate=learning_rate,
         num_train_steps=num_train_steps,
         group_size=group_size,
@@ -103,7 +104,7 @@ if __name__ == "__main__":
     parser.add_argument("--train-ratio", type=float, default=0.9)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--steps", type=int, default=3500)
-    parser.add_argument("--group-size", type=int, default=8)
+    parser.add_argument("--group-size", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--grad-accum", type=int, default=2)
     parser.add_argument("--max-new-tokens", type=int, default=256)

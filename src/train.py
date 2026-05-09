@@ -20,23 +20,30 @@ from trl import GRPOConfig, GRPOTrainer
 from datasets import Dataset
 
 from src.data import create_splits, SYSTEM_PROMPT
-from src.reward import compute_reward
+from src.reward import compute_reward, predicted_answer_text
 from src.callbacks import FairRLVRCallback, TrainingDynamicsLogger
 
 
 # ── Reward wrapper for GRPOTrainer ────────────────────────
 
-def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=None):
+def make_reward_fn(
+    ground_truth_map: dict,
+    lambda_fair: float = 0.5,
+    alpha_consistency: float = 0.0,
+    callback=None,
+):
     """
     Create a reward function compatible with TRL's GRPOTrainer.
 
     GRPOTrainer calls: reward_fn(completions, prompts=prompts, **dataset_columns)
-    Extra dataset columns (category, context_condition, unknown_label) are forwarded
-    via kwargs when remove_unused_columns=False is set in GRPOConfig.
+    Extra dataset columns (category, context_condition, unknown_label,
+    template_family_key, ans0/ans1/ans2) are forwarded via kwargs when
+    remove_unused_columns=False is set in GRPOConfig.
 
     Args:
         ground_truth_map: dict mapping prompt text → ground truth label index
         lambda_fair: fairness reward weight
+        alpha_consistency: counterfactual-consistency bonus weight (0.0 disables)
         callback: optional FairRLVRCallback — if provided, log_generation_batch()
                   is called each step so phase tracking and CoT logs are populated
     """
@@ -46,6 +53,24 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
         context_conditions = kwargs.get("context_condition", [None] * len(completions))
         unknown_labels = kwargs.get("unknown_label", [None] * len(completions))
         target_labels = kwargs.get("target_label", [None] * len(completions))
+        family_keys = kwargs.get("template_family_key", [None] * len(completions))
+        ans0 = kwargs.get("ans0", [None] * len(completions))
+        ans1 = kwargs.get("ans1", [None] * len(completions))
+        ans2 = kwargs.get("ans2", [None] * len(completions))
+
+        # ── Pre-compute predicted answer text per completion (for sibling pairing) ──
+        # Map family_key → list of (completion_idx, predicted_text). Predictions
+        # from completions where the prompt is from the SAME template family but
+        # a different demographic fill are the "siblings" used for consistency.
+        family_predictions: dict = {}
+        per_completion_text: list = []
+        for i, completion in enumerate(completions):
+            opts = (ans0[i], ans1[i], ans2[i])
+            txt = predicted_answer_text(completion, opts) if all(o is not None for o in opts) else None
+            per_completion_text.append(txt)
+            key = family_keys[i] if i < len(family_keys) else None
+            if alpha_consistency > 0 and key is not None:
+                family_predictions.setdefault(key, []).append((i, txt, prompts[i] if i < len(prompts) else None))
 
         rewards = []
         labels = []
@@ -57,12 +82,27 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
                 print(f"[WARNING] Ground truth not found for prompt (step {i}). Returning 0.")
                 rewards.append(0.0)
             else:
+                # Sibling answer texts: predictions in the SAME family but from a
+                # DIFFERENT prompt (different demographic fill). Skip same-prompt
+                # entries (those are GRPO's G group-mates, not counterfactuals).
+                sibling_texts: list = []
+                if alpha_consistency > 0:
+                    key = family_keys[i] if i < len(family_keys) else None
+                    if key is not None:
+                        sibling_texts = [
+                            t for (j, t, p) in family_predictions.get(key, [])
+                            if j != i and p != prompt_text and t is not None
+                        ]
+                opts = (ans0[i], ans1[i], ans2[i])
                 result = compute_reward(
                     text=completion,
                     ground_truth_label=label,
                     context_condition=context_conditions[i] if i < len(context_conditions) else None,
                     target_label=target_labels[i] if i < len(target_labels) else None,
                     lambda_fair=lambda_fair,
+                    alpha_consistency=alpha_consistency,
+                    options=opts if all(o is not None for o in opts) else None,
+                    sibling_answer_texts=sibling_texts,
                 )
                 rewards.append(result["r_total"])
             labels.append(label)
@@ -97,12 +137,23 @@ def make_reward_fn(ground_truth_map: dict, lambda_fair: float = 0.5, callback=No
 
 # ── Dataset formatting for GRPOTrainer ────────────────────
 
-def build_grpo_dataset(split_data, tokenizer) -> tuple[Dataset, dict]:
+def build_grpo_dataset(split_data, tokenizer, sort_by_family: bool = True) -> tuple[Dataset, dict]:
     """
     Build a dataset for GRPOTrainer and a ground truth lookup map.
 
     GRPOTrainer expects a dataset with a "prompt" column containing
     either a string or list of chat messages.
+
+    Each row also exposes:
+      - template_family_key: f"{category}:{question_index}:{context_condition}"
+        Used by the counterfactual-consistency reward to identify siblings
+        (same template, different demographic fill) within a batch.
+      - ans0/ans1/ans2: option text strings, used to map (a)/(b)/(c) →
+        canonical answer text for cross-variant comparison.
+
+    When sort_by_family=True (default), the dataset is reordered so that
+    siblings end up in adjacent rows, maximizing the chance they appear in
+    the same GRPO reward batch and the consistency bonus actually fires.
 
     Returns:
         (dataset, ground_truth_map) where ground_truth_map maps
@@ -123,18 +174,31 @@ def build_grpo_dataset(split_data, tokenizer) -> tuple[Dataset, dict]:
             messages, tokenize=False, add_generation_prompt=True
         )
 
+        category = example["category"]
+        qidx = example.get("question_index", -1)
+        condition = example["context_condition"]
+        family_key = f"{category}:{qidx}:{condition}"
+
         records.append({
             "prompt": prompt_str,
-            "category": example["category"],
-            "context_condition": example["context_condition"],
+            "category": category,
+            "context_condition": condition,
             "unknown_label": example.get("unknown_label", -1),
             # target_label = BBQ stereotype-aligned answer index (or -1 if absent).
             # Kept for API compatibility with compute_reward(); not used in reward formula.
-            # The Elfsong/BBQ HF dataset includes this column natively; .map() preserves it.
             "target_label": example.get("target_label", -1) if example.get("target_label") is not None else -1,
+            # Counterfactual-consistency support
+            "template_family_key": family_key,
+            "ans0": example.get("ans0", "") or "",
+            "ans1": example.get("ans1", "") or "",
+            "ans2": example.get("ans2", "") or "",
         })
 
         ground_truth_map[prompt_str] = example["answer_label"]
+
+    if sort_by_family:
+        # Adjacency = sibling co-batching. Stable sort on the family key.
+        records.sort(key=lambda r: r["template_family_key"])
 
     dataset = Dataset.from_list(records)
     return dataset, ground_truth_map
@@ -146,9 +210,10 @@ def train(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
     train_ratio: float = 0.9,
     lambda_fair: float = 0.5,
+    alpha_consistency: float = 0.0,
     learning_rate: float = 1e-5,
     num_train_steps: int = 3500,
-    group_size: int = 8,
+    group_size: int = 2,
     batch_size: int = 8,
     gradient_accumulation: int = 2,
     max_new_tokens: int = 256,
@@ -172,6 +237,9 @@ def train(
         model_name: HuggingFace model name
         train_ratio: fraction of full BBQ dataset used for training (default 0.9)
         lambda_fair: fairness reward weight
+        alpha_consistency: counterfactual-consistency bonus weight
+            (Ravulu et al. 2024 CDA, adapted to RLVR). Default 0.0 (disabled).
+            Recommended: 0.25.
         learning_rate: learning rate
         num_train_steps: total training steps
         group_size: G — number of completions per prompt
@@ -210,6 +278,7 @@ def train(
         "model_name": model_name,
         "train_ratio": train_ratio,
         "lambda_fair": lambda_fair,
+        "alpha_consistency": alpha_consistency,
         "learning_rate": learning_rate,
         "num_train_steps": num_train_steps,
         "group_size": group_size,
@@ -287,6 +356,7 @@ def train(
     reward_fn = make_reward_fn(
         ground_truth_map=ground_truth_map,
         lambda_fair=lambda_fair,
+        alpha_consistency=alpha_consistency,
         callback=fair_callback,
     )
 
@@ -350,6 +420,8 @@ def train(
     print(f"  Model: {model_name}")
     print(f"  Steps: {num_train_steps}")
     print(f"  λ (fairness reward weight): {lambda_fair}")
+    print(f"  α (consistency bonus weight): {alpha_consistency} "
+          f"({'on' if alpha_consistency > 0 else 'off'})")
     print(f"  Group size: {group_size}")
     print(f"  Micro-batch: {batch_size}, grad-accum: {gradient_accumulation}, "
           f"effective batch: {effective_batch}")
@@ -401,6 +473,9 @@ if __name__ == "__main__":
 
     # Reward
     parser.add_argument("--lambda-fair", type=float, default=None)
+    parser.add_argument("--alpha-consistency", type=float, default=None,
+                        help="Counterfactual-consistency bonus weight (default 0.0 = off; "
+                             "0.25 is the recommended on value)")
 
     # Training
     parser.add_argument("--lr", type=float, default=None)
@@ -444,9 +519,10 @@ if __name__ == "__main__":
         "model_name": _resolve(args.model, "model_name", "Qwen/Qwen2.5-3B-Instruct"),
         "train_ratio": _resolve(args.train_ratio, "train_ratio", 0.9),
         "lambda_fair": _resolve(args.lambda_fair, "lambda_fair", 0.5),
+        "alpha_consistency": _resolve(args.alpha_consistency, "alpha_consistency", 0.0),
         "learning_rate": _resolve(args.lr, "learning_rate", 1e-5),
         "num_train_steps": _resolve(args.steps, "num_train_steps", 3500),
-        "group_size": _resolve(args.group_size, "group_size", 8),
+        "group_size": _resolve(args.group_size, "group_size", 2),
         "batch_size": _resolve(args.batch_size, "batch_size", 8),
         "gradient_accumulation": _resolve(args.grad_accum, "gradient_accumulation", 2),
         "max_new_tokens": _resolve(args.max_new_tokens, "max_new_tokens", 256),

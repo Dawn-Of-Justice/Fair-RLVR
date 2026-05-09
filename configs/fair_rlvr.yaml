@@ -8,11 +8,14 @@ train_ratio: 0.9
 
 # Reward
 lambda_fair: 0.5
+# Counterfactual-consistency bonus (Ravulu et al. 2024 CDA, RLVR-adapted).
+# 0.0 disables; 0.25 is the recommended on value.
+alpha_consistency: 0.25
 
 # Training
 learning_rate: 1.0e-5
 num_train_steps: 3500
-group_size: 8
+group_size: 2
 batch_size: 8           # drop to 4 + set gradient_accumulation: 4 if on <80GB GPU
 gradient_accumulation: 2
 max_new_tokens: 256     # BBQ reasoning fits in ~100 tokens; 256 gives headroom, halves gen cost vs 512

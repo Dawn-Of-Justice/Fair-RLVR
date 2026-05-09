@@ -166,9 +166,11 @@ class FairRLVRCallback(TrainerCallback):
         batch_stats = {
             # Binary fairness reward (0.0 or +1.0)
             "r_fairness": [],
+            # Counterfactual-consistency bonus (0.0 or +1.0)
+            "r_consistency": [],
             # Structural penalty (0.0 to 1.2)
             "p_structural": [],
-            # Total reward = lambda_fair * r_fairness - p_structural
+            # Total reward = lambda_fair * r_fairness + alpha * r_consistency - p_structural
             "r_total": [],
             # Aggregate counts
             "abstained": 0,
@@ -193,6 +195,7 @@ class FairRLVRCallback(TrainerCallback):
                 lambda_fair=lambda_fair,
             )
             batch_stats["r_fairness"].append(result["r_fairness"])
+            batch_stats["r_consistency"].append(result.get("r_consistency", 0.0))
             batch_stats["p_structural"].append(result["p_structural"])
             batch_stats["r_total"].append(result["r_total"])
             batch_stats["total"] += 1
@@ -255,6 +258,7 @@ class FairRLVRCallback(TrainerCallback):
             "lambda_fair": lambda_fair,
             "avg_r_total": _avg("r_total"),
             "avg_r_fairness": _avg("r_fairness"),
+            "avg_r_consistency": _avg("r_consistency"),
             "avg_p_structural": _avg("p_structural"),
             "accuracy": batch_stats["correct"] / n if n > 0 else 0.0,
             "format_failure_rate": batch_stats["format_failures"] / n if n > 0 else 0.0,

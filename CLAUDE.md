@@ -92,13 +92,14 @@ python -m src.data
 
 ## Key Design Decisions
 
-- **Reward equation simplified to 2 components**: `R_total = λ · R_fairness - P_structural`
+- **Reward equation**: `R_total = λ · R_fairness + α · R_consistency - P_structural`
   - `R_correctness` removed: redundant once `P_structural` covers format violations; zeros out in GRPO group normalization once format is stable
   - `P_leak` (Sentence-BERT) removed: single-letter MCQA answers `(a)/(b)/(c)` never reach cosine similarity τ=0.85 against multi-sentence reasoning chains — dead code
-- **Lambda (`λ`)**: Controls fairness signal strength. Even `λ=0.1` achieves debiasing. Default is 0.5. Max reward at λ=0.5 is `0.5 × 1.0 = 0.5`; reward range is `[−1.2, 0.5]` (four simultaneous violations → −1.2).
+  - `R_consistency` added: counterfactual-consistency bonus (Ravulu et al. 2024 CDA, RLVR-adapted). +1 if the predicted ANSWER TEXT (option content, not the (a)/(b)/(c) index) matches an in-batch sibling from the same BBQ template family but a different demographic fill. Off by default (α=0); set `alpha_consistency: 0.25` in the YAML or pass `--alpha-consistency 0.25` to enable. Sibling co-batching is achieved by `build_grpo_dataset(sort_by_family=True)`.
+- **Lambda (`λ`)**: Controls fairness signal strength. Even `λ=0.1` achieves debiasing. Default is 0.5. Max reward at λ=0.5, α=0 is `0.5`; with α=0.25 the max becomes `0.75`. Reward range is `[−1.2, λ + α]`.
 - **Training uses 4-bit quantization** (`bitsandbytes` nf4); evaluation loads in float16 without quantization.
 - **LoRA targets**: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` (all attention + MLP projections). All baselines use the same targets for equal parameter counts.
-- **Group size G=8**: Standard GRPO default. For 3-choice MCQA, reward variance comes from answer correctness (3 possible outcomes), not reasoning diversity — larger G yields diminishing returns and doubles generation cost.
+- **Group size G=2**: For 3-choice MCQA the reward signal is dominated by correctness (3 possible outcomes), so the GRPO group baseline is well-estimated even at G=2. Lower G drastically reduces generation cost vs the standard G=8; if entropy collapses, raise G first.
 - **Template-family-aware split**: A naive `train_test_split` stratified only by category puts near-duplicate question variants across splits, inflating eval scores. `create_splits()` groups by `(category, question_index)` to prevent this.
 - **`unknown_label` field**: The "Unknown" answer is not always option (c). Always use the per-question `unknown_label` index for abstention detection.
 - **Seed consistency**: All scripts (train, eval, all baselines) must use `--seed 42` (the default). Mismatched seeds produce different train/eval splits → data leakage.
@@ -122,7 +123,7 @@ The λ=0 baseline is the critical ablation: if it approaches Fair-RLVR's bias sc
 | Model | `Qwen/Qwen2.5-3B-Instruct` |
 | Quantization | 4-bit bitsandbytes nf4 (training); float16 (eval) |
 | LoRA r / α | 16 / 32 |
-| Group size G | 8 |
+| Group size G | 2 |
 | Batch size | 8 per device (grad_accum=2 → effective batch=16) |
 | Max new tokens | 512 |
 | Learning rate | 1e-5 |
