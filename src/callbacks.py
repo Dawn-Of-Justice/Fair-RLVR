@@ -15,7 +15,7 @@ from collections import defaultdict
 
 from transformers import TrainerCallback
 
-from src.reward import extract_answer, extract_think, answer_to_index, compute_reward
+from src.reward import extract_answer, extract_think, answer_to_index
 
 
 class FairRLVRCallback(TrainerCallback):
@@ -139,6 +139,7 @@ class FairRLVRCallback(TrainerCallback):
         step: int,
         completions: list[str],
         ground_truth_labels: list[int],
+        precomputed_results: list,
         categories: list[str] = None,
         context_conditions: list[str] = None,
         unknown_labels: list[int] = None,
@@ -151,18 +152,33 @@ class FairRLVRCallback(TrainerCallback):
         Called automatically from make_reward_fn() in train.py — the reward
         function is the only point where GRPOTrainer exposes raw completions.
 
+        `precomputed_results` is required (not optional). The callback used to
+        recompute compute_reward() locally for logging, but that path didn't
+        have access to alpha_consistency or sibling-pairing context, so logged
+        r_consistency was always 0 even when training used α>0. Forcing the
+        caller to pass the actual training rewards keeps batch_logs in sync
+        with what the optimizer is actually seeing.
+
         Args:
             step: current training step (synced to trainer.global_step)
             completions: list of model output strings
             ground_truth_labels: list of BBQ ground truth labels
+            precomputed_results: list of compute_reward() output dicts from the
+                training reward function, one per completion. Same length and
+                ordering as `completions`.
             categories: list of BBQ categories (optional)
             context_conditions: list of "ambig" or "disambig" (optional)
             unknown_labels: list of unknown option indices (0/1/2) (optional)
             target_labels: list of BBQ stereotype-aligned answer indices (optional);
                 accepted for API compatibility, not used in R_total
-            lambda_fair: fairness reward weight — must match the training lambda
-                so batch_logs reflect the actual reward values, not a default
+            lambda_fair: fairness reward weight — recorded in the per-step
+                summary as a stamp of what was used at this step
         """
+        if len(precomputed_results) != len(completions):
+            raise ValueError(
+                f"precomputed_results length {len(precomputed_results)} != "
+                f"completions length {len(completions)}"
+            )
         batch_stats = {
             # Binary fairness reward (0.0 or +1.0)
             "r_fairness": [],
@@ -188,12 +204,16 @@ class FairRLVRCallback(TrainerCallback):
         for i, (completion, label) in enumerate(zip(completions, ground_truth_labels)):
             cond = context_conditions[i] if context_conditions is not None else None
             tgt = target_labels[i] if target_labels is not None else None
-            result = compute_reward(
-                completion, label,
-                context_condition=cond,
-                target_label=tgt,
-                lambda_fair=lambda_fair,
-            )
+            # `precomputed_results[i]` is the same dict the optimizer saw —
+            # logged numbers are guaranteed to match the actual training reward.
+            result = precomputed_results[i]
+            if result is None:
+                # Caller filtered to valid labels in train.py before calling
+                # this; a None here would indicate an upstream filter mismatch.
+                raise ValueError(
+                    f"precomputed_results[{i}] is None for label={label}; "
+                    f"train.py should filter unmapped prompts before calling."
+                )
             batch_stats["r_fairness"].append(result["r_fairness"])
             batch_stats["r_consistency"].append(result.get("r_consistency", 0.0))
             batch_stats["p_structural"].append(result["p_structural"])

@@ -90,6 +90,10 @@ def make_reward_fn(
 
         rewards = []
         labels = []
+        # Per-completion compute_reward outputs, used to forward to the callback
+        # so it doesn't recompute (and so logged r_consistency reflects the actual
+        # training-time alpha_consistency, not a default-0 recomputation).
+        results: list = []
         for i, completion in enumerate(completions):
             prompt_text = prompts[i] if i < len(prompts) else ""
             label = ground_truth_map.get(prompt_text, -1)
@@ -97,6 +101,7 @@ def make_reward_fn(
             if label == -1:
                 print(f"[WARNING] Ground truth not found for prompt (step {i}). Returning 0.")
                 rewards.append(0.0)
+                results.append(None)
             else:
                 # Sibling answer texts: predictions in the SAME family but from a
                 # DIFFERENT prompt (different demographic fill). Skip same-prompt
@@ -121,20 +126,24 @@ def make_reward_fn(
                     sibling_answer_texts=sibling_texts,
                 )
                 rewards.append(result["r_total"])
+                results.append(result)
             labels.append(label)
 
         # Wire into callback for live phase tracking and CoT logging.
         # Use callback.current_step (set in on_step_end) so the step number
         # stays in sync with trainer.global_step rather than a separate counter.
+        # Forward the precomputed `results` so the callback doesn't redo work
+        # (and so r_consistency in batch_logs reflects the real alpha used here).
         if callback is not None:
             step = callback.current_step
-            valid = [(c, l, cat, cond, unk, tgt)
-                     for c, l, cat, cond, unk, tgt
+            valid = [(c, l, cat, cond, unk, tgt, r)
+                     for c, l, cat, cond, unk, tgt, r
                      in zip(completions, labels, categories, context_conditions,
-                            unknown_labels, target_labels)
+                            unknown_labels, target_labels, results)
                      if l != -1]
             if valid:
-                v_completions, v_labels, v_cats, v_conds, v_unks, v_tgts = zip(*valid)
+                (v_completions, v_labels, v_cats, v_conds,
+                 v_unks, v_tgts, v_results) = zip(*valid)
                 callback.log_generation_batch(
                     step=step,
                     completions=list(v_completions),
@@ -144,6 +153,7 @@ def make_reward_fn(
                     unknown_labels=list(v_unks),
                     target_labels=list(v_tgts),
                     lambda_fair=lambda_fair,
+                    precomputed_results=list(v_results),
                 )
 
         if profile:

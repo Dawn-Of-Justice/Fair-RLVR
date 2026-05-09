@@ -643,7 +643,7 @@ def run_evaluation(
     checkpoint: str,
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
     n_eval: int = None,
-    max_new_tokens: int = 512,
+    max_new_tokens: int = 256,
     batch_size: int = 8,
     output_dir: str = "results/eval",
     run_faithfulness: bool = False,
