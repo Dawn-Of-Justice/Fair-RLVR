@@ -1,6 +1,6 @@
 # Reference Paper Summaries
 
-Quick-reference notes for all 14 papers in this folder. Each entry covers what the paper is about, its key contributions, limitations, and directions for future work.
+Quick-reference notes for all 15 papers in this folder. Each entry covers what the paper is about, its key contributions, limitations, and directions for future work.
 
 ---
 
@@ -20,6 +20,7 @@ Quick-reference notes for all 14 papers in this folder. Each entry covers what t
 12. [Structure Trumps Size: Rethinking Data Quality for LLM Reasoning](#12-structure-trumps-size-rethinking-data-quality-for-llm-reasoning)
 13. [Med-RLVR: Emerging Medical Reasoning via RL](#13-med-rlvr-emerging-medical-reasoning-via-rl)
 14. [Reward Hacking Mitigation using Verifiable Composite Rewards](#14-reward-hacking-mitigation-using-verifiable-composite-rewards)
+15. [Mitigating Bias in RLHF for Large Language Models](#15-mitigating-bias-in-rlhf-for-large-language-models)
 
 ---
 
@@ -544,6 +545,60 @@ This is the most direct inspiration for Fair-RLVR's reward function. Fair-RLVR a
 
 ---
 
+## 15. Mitigating Bias in RLHF for Large Language Models
+
+**File:** `Mitigating_Bias_in_Reinforcement_Learning_from_Human_Feedback_for_Large_Language_Models.pdf`
+**Authors:** Chaithanya Ravulu (Rocket Companies); Rahul Sarabu, Manoj Suryadevara, Mridula Dileepraj Kidiyur (Walmart); Venkata Gummadi (Expedia)
+**Venue:** 2024 IEEE International Conference on AI x Data and Knowledge Engineering (AIxDKE) — DOI 10.1109/AIxDKE63520.2024.00019
+
+### What It's About
+
+A practitioner-oriented empirical comparison of four bias-mitigation strategies layered on top of standard RLHF, tested on sentiment classification (BERT) and three GPT-3-style tasks (text completion, QA, dialogue generation):
+
+1. **Diverse Feedback (DF)** — demographically balanced annotator panel.
+2. **Bias Correction (BC)** — two stages. Reward debiasing subtracts an evaluator-bias term: r̂_i = r_i − b_i(x). Output debiasing reshapes the policy via a Boltzmann-style reweight: π_debiased(a|s) = π_θ(a|s) · exp(−λB(a,s)) / Z(s).
+3. **Fairness Constraints (FC)** — Lagrangian augmentation of the RLHF objective: J_fair(θ) = J(θ) − Σ_i α_i C_i(θ), where C_i are demographic-parity / equal-opportunity terms.
+4. **Counterfactual Data Augmentation (CDA)** — swap protected attributes in training prompts, train on the union, add a reward bonus for consistent answers across counterfactual pairs.
+
+Reported against four fairness metrics — Demographic Parity Difference (DPD), Equal Opportunity Difference (EOD), Disparate Impact Ratio (DIR), Representation Bias (RB) — plus task-specific accuracy/perplexity/F1/BLEU.
+
+### Key Contributions
+
+- Catalogues four orthogonal mitigation axes (data diversity, reward correction, constrained optimization, counterfactual augmentation) inside one framework — a useful taxonomy even though each idea exists in prior literature.
+- Reports stacking all four ("ALL") is super-additive: 60–70% bias reduction across tasks vs. 30–60% for any single method.
+- Among singletons: FC gives the largest bias drop but the worst accuracy hit (3.4%); BC is the best accuracy/fairness trade-off; CDA is the most consistent across metrics.
+- Paired t-tests across seeds: bias improvements significant at p<0.01 for all methods; performance drops only consistently significant for FC and ALL — suggesting DF/BC/CDA can be added with low risk to task quality.
+
+### Limitations
+
+- **Uses RLHF, ignores known structural pathologies.** Papers 6 (Sycophancy Amplification) and 9 (Preference Collapse) already prove RLHF amplifies annotator bias and suppresses minority preferences. This paper proposes patches but never acknowledges the underlying issue — its mitigations are bandaids on a structurally biased optimizer.
+- **The reward debiasing term b_i(x) is unspecified.** The text doesn't say how the evaluator-bias function is estimated, validated, or kept calibrated as evaluator pools shift.
+- **Results tables look suspiciously monotonic.** Every metric improves uniformly under every method, which is rare in real fairness work — DPD and EOD typically trade off in practice.
+- **No standardized benchmark.** Bias is measured with abstract DPD/EOD/DIR on internal datasets — never BBQ, StereoSet, or WinoBias. Hard to compare against published baselines.
+- **No causal analysis.** Whether the model's behavior is *because* of fairness reasoning, or whether constraints just suppress generation, is never investigated.
+- **English only, BERT-era.** Sentiment uses BERT (encoder-only); QA/dialogue use unspecified GPT-3 style. Generalization to modern decoder-only reasoning LLMs is untested.
+- **CDA assumes well-defined attribute swaps.** Race/gender swaps are easy; SES, disability, religion, intersectional are not. The paper sidesteps this.
+
+### Relevance to Fair-RLVR
+
+This is an RLHF-camp paper; Fair-RLVR is RLVR-camp. But three of the four techniques transfer cleanly to RLVR with objective labels:
+
+- **CDA → counterfactual-consistency reward.** BBQ templates already include demographic fills (the same template instantiated with different names/groups). This dataset structure is currently unused at training time — the natural Fair-RLVR extension is a consistency term rewarding the same answer across (prompt_v1, prompt_v2) when only the demographic varies.
+- **FC → group-disparity penalty in GRPO.** The Lagrangian J_fair = J − Σ α_i C_i(θ) maps directly to adding a per-batch term `−α · (max_cat acc − min_cat acc)` to the reward, enforcing parity across BBQ's 9 categories.
+- **DF → curriculum / weighted sampling.** "Diverse feedback" doesn't apply (no annotators), but its analog is reweighting the BBQ training distribution toward currently weakest categories.
+- **BC** has no clean RLVR analog — there's no annotator to debias because the reward is automated. This is a feature of RLVR, not a missing capability.
+
+The paper also exposes a gap in our planned evaluation: we report BBQ-official bias score and the simplified error-based metric, but not DPD/EOD/DIR/RB. Adding these would make our numbers comparable to the broader fairness literature.
+
+### Future Directions
+
+- Replicating the FC + CDA + DF stack inside RLVR (instead of RLHF) to verify the "stacking is super-additive" claim under verifiable reward.
+- Causal/faithfulness analysis of which mitigation actually shifts reasoning vs. just suppresses outputs (this paper does none; Fair-RLVR Experiment 4 partly fills this gap).
+- Standardizing on shared benchmarks (BBQ, StereoSet, WinoBias) so mitigation methods can be cross-paper compared.
+- Extending counterfactual swaps to non-binary attributes (intersectional categories, SES, disability).
+
+---
+
 ## Quick Comparison Table
 
 | Paper | Core Contribution | Relevance to Fair-RLVR |
@@ -562,3 +617,4 @@ This is the most direct inspiration for Fair-RLVR's reward function. Fair-RLVR a
 | Structure Trumps Size | Data composition > data volume | Informs training data ratio design |
 | Med-RLVR | RLVR for medical MCQA; 6 training phases | Source of 6-phase taxonomy in Fair-RLVR |
 | VCR Reward Hacking | Composite reward stops reward hacking | Direct inspiration for P_structural penalty |
+| Mitigating Bias in RLHF | DF / BC / FC / CDA stack on RLHF | Three techniques (CDA, FC, DF) transfer to RLVR; motivates new ablations + DPD/EOD/DIR metrics |
