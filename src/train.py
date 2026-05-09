@@ -31,6 +31,7 @@ def make_reward_fn(
     lambda_fair: float = 0.5,
     alpha_consistency: float = 0.0,
     callback=None,
+    profile: bool = False,
 ):
     """
     Create a reward function compatible with TRL's GRPOTrainer.
@@ -46,8 +47,23 @@ def make_reward_fn(
         alpha_consistency: counterfactual-consistency bonus weight (0.0 disables)
         callback: optional FairRLVRCallback — if provided, log_generation_batch()
                   is called each step so phase tracking and CoT logs are populated
+        profile: if True, print per-call timing of generation phase + reward phase.
+                 Use to diagnose batch_size scaling. The "gen+train" line is the
+                 wall-clock between reward calls, ≈ GPU work (generation + loss +
+                 backward + optimizer.step()) for one micro-batch. The "reward"
+                 line is CPU post-processing time inside this function.
     """
+    import time
+    timer_state = {"last_call_end": None, "call_count": 0}
+
     def reward_fn(completions, **kwargs):
+        if profile:
+            t_start = time.time()
+            if timer_state["last_call_end"] is not None:
+                gen_train_time = t_start - timer_state["last_call_end"]
+                print(f"[profile] gen+train phase: {gen_train_time:.2f}s "
+                      f"({len(completions)} completions, "
+                      f"{gen_train_time/max(len(completions),1):.3f}s/completion)")
         prompts = kwargs.get("prompts", [])
         categories = kwargs.get("category", [None] * len(completions))
         context_conditions = kwargs.get("context_condition", [None] * len(completions))
@@ -129,6 +145,14 @@ def make_reward_fn(
                     target_labels=list(v_tgts),
                     lambda_fair=lambda_fair,
                 )
+
+        if profile:
+            t_end = time.time()
+            reward_time = t_end - t_start
+            timer_state["call_count"] += 1
+            timer_state["last_call_end"] = t_end
+            print(f"[profile] reward fn:       {reward_time:.3f}s "
+                  f"(call #{timer_state['call_count']})")
 
         return rewards
 
@@ -229,6 +253,7 @@ def train(
     logging_steps: int = 10,
     seed: int = 42,
     dry_run: bool = False,
+    profile: bool = False,
 ):
     """
     Train Fair-RLVR with GRPO.
@@ -358,6 +383,7 @@ def train(
         lambda_fair=lambda_fair,
         alpha_consistency=alpha_consistency,
         callback=fair_callback,
+        profile=profile,
     )
 
     # ── GRPO Config ───────────────────────────────────────
@@ -497,6 +523,9 @@ if __name__ == "__main__":
 
     # Modes
     parser.add_argument("--dry-run", action="store_true", help="Run 5 steps to test pipeline")
+    parser.add_argument("--profile", action="store_true",
+                        help="Print per-call timing of generation+train phase vs reward fn. "
+                             "Use to diagnose batch_size scaling.")
 
     args = parser.parse_args()
 
@@ -535,6 +564,7 @@ if __name__ == "__main__":
         "save_steps": _resolve(args.save_steps, "save_steps", 500),
         "seed": _resolve(args.seed, "seed", 42),
         "dry_run": args.dry_run,
+        "profile": args.profile,
     }
 
     train(**train_kwargs)
