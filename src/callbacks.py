@@ -318,7 +318,7 @@ class FairRLVRCallback(TrainerCallback):
                 "train/abstention_rate":       step_summary["abstention_rate"],
                 "train/sibling_hit_rate":      step_summary["sibling_hit_rate"],
                 "train/format_failure_rate":   step_summary["format_failure_rate"],
-            }, step=step)
+            })
 
         # Save CoT samples at checkpoint steps.
         # With gradient accumulation, log_generation_batch fires multiple times

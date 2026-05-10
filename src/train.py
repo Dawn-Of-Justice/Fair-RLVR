@@ -68,17 +68,19 @@ class FairGRPOTrainer(GRPOTrainer):
         self._use_family_sampler = use_family_sampler
         self._sampler_seed = sampler_seed
 
-    def _get_train_sampler(self):
-        if (
-            self._use_family_sampler
-            and self.train_dataset is not None
-            and "template_family_key" in self.train_dataset.column_names
-        ):
-            return FamilyGroupedSampler(
-                dataset_family_keys=self.train_dataset["template_family_key"],
-                seed=self._sampler_seed,
-            )
-        return super()._get_train_sampler()
+    def _get_train_sampler(self, train_dataset=None):
+      dataset = train_dataset if train_dataset is not None else self.train_dataset
+      if (
+          self._use_family_sampler
+          and dataset is not None
+          and "template_family_key" in dataset.column_names
+      ):
+          return FamilyGroupedSampler(
+              dataset_family_keys=dataset["template_family_key"],
+              seed=self._sampler_seed,
+          )
+      return super()._get_train_sampler(train_dataset)
+
 
 
 # ── Reward wrapper for GRPOTrainer ────────────────────────
