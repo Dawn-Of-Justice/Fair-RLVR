@@ -16,9 +16,9 @@ alpha_consistency: 0.25
 learning_rate: 1.0e-5
 lr_scheduler_type: "cosine"
 warmup_ratio: 0.05
-num_train_steps: 3500
-group_size: 2
-batch_size: 8           # drop to 4 + set gradient_accumulation: 4 if on <80GB GPU
+num_train_steps: 1000
+group_size: 8
+batch_size: 48           # drop to 4 + set gradient_accumulation: 4 if on <80GB GPU
 gradient_accumulation: 2
 max_new_tokens: 256     # BBQ reasoning fits in ~100 tokens; 256 gives headroom, halves gen cost vs 512
 kl_coeff: 0.01
