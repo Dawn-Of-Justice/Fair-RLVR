@@ -17,6 +17,12 @@ from transformers import TrainerCallback
 
 from src.reward import extract_answer, extract_think, answer_to_index
 
+try:
+    import wandb as _wandb
+    _WANDB_AVAILABLE = True
+except ImportError:
+    _WANDB_AVAILABLE = False
+
 
 class FairRLVRCallback(TrainerCallback):
     """
@@ -99,11 +105,12 @@ class FairRLVRCallback(TrainerCallback):
                     base += (
                         f"\n           "
                         f"acc={latest_batch.get('accuracy', 0):.3f} | "
-                        f"r_bin={latest_batch.get('avg_r_binary', 0):+.2f} | "
+                        f"r_fair={latest_batch.get('avg_r_fairness', 0):.3f} | "
+                        f"r_cons={latest_batch.get('avg_r_consistency', 0):.3f} | "
                         f"p_struct={latest_batch.get('avg_p_structural', 0):.2f} | "
-                        f"p_stereo={latest_batch.get('avg_p_stereotype', 0):.3f} | "
                         f"stereo_rate={latest_batch.get('stereotype_pick_rate_ambig', 0):.3f} | "
-                        f"abstain={latest_batch.get('abstention_rate', 0):.3f}"
+                        f"abstain={latest_batch.get('abstention_rate', 0):.3f} | "
+                        f"sib_hit={latest_batch.get('sibling_hit_rate', 0):.3f}"
                     )
                 print(base)
 
@@ -145,6 +152,7 @@ class FairRLVRCallback(TrainerCallback):
         unknown_labels: list[int] = None,
         target_labels: list[int] = None,
         lambda_fair: float = 0.5,
+        sibling_hit_rate: float = 0.0,
     ):
         """
         Log detailed reward breakdown and CoT samples for a batch.
@@ -288,11 +296,29 @@ class FairRLVRCallback(TrainerCallback):
             "stereotype_pick_rate_ambig": (
                 batch_stats["stereotype_picks_ambig"] / n_ambig if n_ambig > 0 else 0.0
             ),
+            # Fraction of completions that had at least one in-batch sibling.
+            # Should be > 0 when FamilyGroupedSampler is active and alpha > 0.
+            # If this stays 0, sibling co-batching is broken.
+            "sibling_hit_rate": sibling_hit_rate,
             "n_samples": n,
             "n_ambig": n_ambig,
             "n_disambig": batch_stats["n_disambig"],
         }
         self.batch_logs.append(step_summary)
+
+        # Push custom metrics to W&B (TRL only auto-logs reward/kl/loss).
+        if _WANDB_AVAILABLE and _wandb.run is not None:
+            _wandb.log({
+                "train/accuracy":              step_summary["accuracy"],
+                "train/avg_reward":            step_summary["avg_r_total"],
+                "train/r_fairness":            step_summary["avg_r_fairness"],
+                "train/r_consistency":         step_summary["avg_r_consistency"],
+                "train/p_structural":          step_summary["avg_p_structural"],
+                "train/stereotype_rate_ambig": step_summary["stereotype_pick_rate_ambig"],
+                "train/abstention_rate":       step_summary["abstention_rate"],
+                "train/sibling_hit_rate":      step_summary["sibling_hit_rate"],
+                "train/format_failure_rate":   step_summary["format_failure_rate"],
+            }, step=step)
 
         # Save CoT samples at checkpoint steps.
         # With gradient accumulation, log_generation_batch fires multiple times

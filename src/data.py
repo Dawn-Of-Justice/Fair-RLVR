@@ -232,6 +232,16 @@ def create_splits(
         example["prompt"] = format_bbq_prompt(example)
         example["answer_option"] = label_to_option(example["answer_label"])
         example["unknown_label"] = get_unknown_label(example)
+        # Store the resolved family key so train.py doesn't need to re-derive it.
+        # Include context_condition: ambig and disambig have different correct answers,
+        # so cross-condition consistency pairing would add noise, not signal.
+        if use_question_index:
+            key_part = str(example.get("question_index", -1))
+        else:
+            key_part = example.get("question", "")
+        example["template_family_key"] = (
+            f"{example['category']}:{key_part}:{example['context_condition']}"
+        )
         return example
 
     train_ds = full_dataset.select(train_indices).map(add_prompt)
