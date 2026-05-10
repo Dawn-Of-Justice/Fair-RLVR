@@ -19,6 +19,8 @@ alpha_consistency: 0.0
 
 # Training — identical to main experiment for fair comparison
 learning_rate: 1.0e-5
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.05
 num_train_steps: 3500
 group_size: 2
 batch_size: 8
@@ -34,3 +36,7 @@ lora_alpha: 32
 output_dir: "results/lambda_sweep"
 save_steps: 500
 seed: 42
+
+# Logging
+use_wandb: false
+wandb_project: "fair-rlvr-lambda-sweep"

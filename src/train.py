@@ -11,10 +11,13 @@ Usage:
 
 import argparse
 import json
+import random
 import yaml
 import torch
+from collections import defaultdict
 from pathlib import Path
 from peft import LoraConfig, TaskType
+from torch.utils.data import Sampler
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import GRPOConfig, GRPOTrainer
 from datasets import Dataset
@@ -22,6 +25,62 @@ from datasets import Dataset
 from src.data import create_splits, SYSTEM_PROMPT
 from src.reward import compute_reward, predicted_answer_text
 from src.callbacks import FairRLVRCallback, TrainingDynamicsLogger
+
+
+# ── Sibling-aware sampler ─────────────────────────────────
+
+class FamilyGroupedSampler(Sampler):
+    """
+    Shuffles the order of template families but keeps members of the same
+    family consecutive. This guarantees that siblings (same BBQ template,
+    different demographic fill) land in the same GRPOTrainer reward batch,
+    so the counterfactual-consistency bonus can actually fire.
+
+    Replaces the default RandomSampler, which scatters siblings across batches
+    regardless of how the dataset is sorted beforehand.
+    """
+
+    def __init__(self, dataset_family_keys: list, seed: int = 42):
+        families: dict = defaultdict(list)
+        for idx, key in enumerate(dataset_family_keys):
+            families[key].append(idx)
+        rng = random.Random(seed)
+        family_groups = list(families.values())
+        rng.shuffle(family_groups)
+        self._indices = [idx for group in family_groups for idx in group]
+
+    def __iter__(self):
+        return iter(self._indices)
+
+    def __len__(self):
+        return len(self._indices)
+
+
+class FairGRPOTrainer(GRPOTrainer):
+    """
+    GRPOTrainer that swaps in FamilyGroupedSampler so siblings always
+    co-appear in the same reward batch. Only activated when the dataset
+    has a template_family_key column and use_family_sampler=True.
+    """
+
+    def __init__(self, *args, use_family_sampler: bool = False, sampler_seed: int = 42, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._use_family_sampler = use_family_sampler
+        self._sampler_seed = sampler_seed
+
+    def _get_train_sampler(self, train_dataset=None):
+      dataset = train_dataset if train_dataset is not None else self.train_dataset
+      if (
+          self._use_family_sampler
+          and dataset is not None
+          and "template_family_key" in dataset.column_names
+      ):
+          return FamilyGroupedSampler(
+              dataset_family_keys=dataset["template_family_key"],
+              seed=self._sampler_seed,
+          )
+      return super()._get_train_sampler(train_dataset)
+
 
 
 # ── Reward wrapper for GRPOTrainer ────────────────────────
@@ -94,6 +153,7 @@ def make_reward_fn(
         # so it doesn't recompute (and so logged r_consistency reflects the actual
         # training-time alpha_consistency, not a default-0 recomputation).
         results: list = []
+        n_with_siblings = 0
         for i, completion in enumerate(completions):
             prompt_text = prompts[i] if i < len(prompts) else ""
             label = ground_truth_map.get(prompt_text, -1)
@@ -114,6 +174,8 @@ def make_reward_fn(
                             t for (j, t, p) in family_predictions.get(key, [])
                             if j != i and p != prompt_text and t is not None
                         ]
+                if sibling_texts:
+                    n_with_siblings += 1
                 opts = (ans0[i], ans1[i], ans2[i])
                 result = compute_reward(
                     text=completion,
@@ -136,6 +198,7 @@ def make_reward_fn(
         # (and so r_consistency in batch_logs reflects the real alpha used here).
         if callback is not None:
             step = callback.current_step
+            sibling_hit_rate = n_with_siblings / len(completions) if completions else 0.0
             valid = [(c, l, cat, cond, unk, tgt, r)
                      for c, l, cat, cond, unk, tgt, r
                      in zip(completions, labels, categories, context_conditions,
@@ -154,6 +217,7 @@ def make_reward_fn(
                     target_labels=list(v_tgts),
                     lambda_fair=lambda_fair,
                     precomputed_results=list(v_results),
+                    sibling_hit_rate=sibling_hit_rate,
                 )
 
         if profile:
@@ -209,9 +273,12 @@ def build_grpo_dataset(split_data, tokenizer, sort_by_family: bool = True) -> tu
         )
 
         category = example["category"]
-        qidx = example.get("question_index", -1)
         condition = example["context_condition"]
-        family_key = f"{category}:{qidx}:{condition}"
+        # Use the key resolved by create_splits() — it already handled the
+        # question_index-vs-question-text fallback. Reconstructing from raw
+        # question_index here would silently use a row counter when question_index
+        # is not a template ID, producing singleton families and no sibling pairs.
+        family_key = example.get("template_family_key", f"{category}:{condition}")
 
         records.append({
             "prompt": prompt_str,
@@ -256,12 +323,17 @@ def train(
     kl_coeff: float = 0.01,
     clip_ratio_high: float = 0.28,
     clip_ratio_low: float = 0.20,
+    lr_scheduler_type: str = "cosine",
+    warmup_ratio: float = 0.05,
     use_4bit: bool = True,
     gradient_checkpointing: bool = True,
     output_dir: str = "results/fair_rlvr",
     save_steps: int = 500,
     logging_steps: int = 10,
     seed: int = 42,
+    use_wandb: bool = False,
+    wandb_project: str = "fair-rlvr",
+    wandb_run_name: str = None,
     dry_run: bool = False,
     profile: bool = False,
 ):
@@ -286,6 +358,11 @@ def train(
         kl_coeff: KL divergence coefficient
         clip_ratio_high: DAPO high clip ratio
         clip_ratio_low: DAPO low clip ratio
+        lr_scheduler_type: HuggingFace scheduler name. "cosine" (default) reaches
+            ~0 at the end but decays slowly early, unlike "linear" which halves LR
+            by the midpoint. For very short runs use "constant_with_warmup".
+        warmup_ratio: fraction of steps used for LR warmup (default 0.05).
+            Stabilises early training when the model is still learning format.
         use_4bit: use 4-bit quantization
         gradient_checkpointing: trade compute for VRAM by recomputing activations
             during backward (default True). Set False for ~30% speedup when VRAM
@@ -294,6 +371,9 @@ def train(
         save_steps: save checkpoint every N steps
         logging_steps: log every N steps
         seed: random seed
+        use_wandb: enable Weights & Biases logging (requires `pip install wandb`)
+        wandb_project: W&B project name (default: "fair-rlvr")
+        wandb_run_name: W&B run name; if None, W&B auto-generates one
         dry_run: if True, run only 5 steps to test pipeline
     """
     output_path = Path(output_dir)
@@ -325,6 +405,11 @@ def train(
         "kl_coeff": kl_coeff,
         "clip_ratio_high": clip_ratio_high,
         "clip_ratio_low": clip_ratio_low,
+        "lr_scheduler_type": lr_scheduler_type,
+        "warmup_ratio": warmup_ratio,
+        "use_wandb": use_wandb,
+        "wandb_project": wandb_project,
+        "wandb_run_name": wandb_run_name,
         "use_4bit": use_4bit,
         "gradient_checkpointing": gradient_checkpointing,
         "seed": seed,
@@ -333,6 +418,17 @@ def train(
     with open(output_path / "config.json", "w") as f:
         json.dump(config, f, indent=2)
     print(f"Config saved to {output_path / 'config.json'}")
+
+    # ── Weights & Biases ──────────────────────────────────
+    if use_wandb:
+        import wandb
+        wandb.init(
+            project=wandb_project,
+            name=wandb_run_name,
+            config=config,
+            dir=str(output_path),
+        )
+        print(f"W&B run: {wandb.run.url}")
 
     # ── Load tokenizer ────────────────────────────────────
     print(f"\nLoading tokenizer: {model_name}")
@@ -412,6 +508,8 @@ def train(
         beta=kl_coeff,
         epsilon=clip_ratio_low,
         epsilon_high=clip_ratio_high,
+        lr_scheduler_type=lr_scheduler_type,
+        warmup_ratio=warmup_ratio,
         # Logging and saving
         logging_steps=logging_steps,
         save_steps=save_steps,
@@ -422,7 +520,7 @@ def train(
         # Training
         bf16=True,
         seed=seed,
-        report_to="none",
+        report_to="wandb" if use_wandb else "none",
         remove_unused_columns=False,
         # Gradient checkpointing for memory efficiency (toggle via --no-grad-checkpoint)
         gradient_checkpointing=gradient_checkpointing,
@@ -437,8 +535,8 @@ def train(
     )
 
     # ── Initialize trainer ────────────────────────────────
-    print("\nInitializing GRPOTrainer...")
-    trainer = GRPOTrainer(
+    print("\nInitializing FairGRPOTrainer...")
+    trainer = FairGRPOTrainer(
         model=model_name,
         args=training_config,
         train_dataset=train_dataset,
@@ -446,6 +544,8 @@ def train(
         peft_config=peft_config,
         processing_class=tokenizer,
         callbacks=[fair_callback],
+        use_family_sampler=(alpha_consistency > 0),
+        sampler_seed=seed,
     )
 
     # ── Train ─────────────────────────────────────────────
@@ -515,6 +615,13 @@ if __name__ == "__main__":
 
     # Training
     parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--lr-scheduler", type=str, default=None,
+                        help="HuggingFace scheduler type (default: cosine). "
+                             "Options: cosine, linear, constant, constant_with_warmup, "
+                             "cosine_with_restarts, polynomial. "
+                             "Use 'constant_with_warmup' for very short runs.")
+    parser.add_argument("--warmup-ratio", type=float, default=None,
+                        help="Fraction of steps for LR warmup (default: 0.05).")
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--group-size", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
@@ -530,6 +637,14 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--save-steps", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
+
+    # Logging
+    parser.add_argument("--wandb", action="store_true", dest="use_wandb",
+                        help="Enable Weights & Biases logging")
+    parser.add_argument("--wandb-project", type=str, default=None,
+                        help="W&B project name (default: fair-rlvr)")
+    parser.add_argument("--wandb-run", type=str, default=None,
+                        help="W&B run name (default: auto-generated by W&B)")
 
     # Modes
     parser.add_argument("--dry-run", action="store_true", help="Run 5 steps to test pipeline")
@@ -568,11 +683,16 @@ if __name__ == "__main__":
         "lora_r": _resolve(args.lora_r, "lora_r", 16),
         "lora_alpha": _resolve(args.lora_alpha, "lora_alpha", 32),
         "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),
+        "lr_scheduler_type": _resolve(args.lr_scheduler, "lr_scheduler_type", "cosine"),
+        "warmup_ratio": _resolve(args.warmup_ratio, "warmup_ratio", 0.05),
         "use_4bit": not args.no_4bit,
         "gradient_checkpointing": not args.no_grad_checkpoint,
         "output_dir": _resolve(args.output_dir, "output_dir", "results/fair_rlvr"),
         "save_steps": _resolve(args.save_steps, "save_steps", 500),
         "seed": _resolve(args.seed, "seed", 42),
+        "use_wandb": args.use_wandb or config_overrides.get("use_wandb", False),
+        "wandb_project": _resolve(args.wandb_project, "wandb_project", "fair-rlvr"),
+        "wandb_run_name": _resolve(args.wandb_run, "wandb_run_name", None),
         "dry_run": args.dry_run,
         "profile": args.profile,
     }

@@ -224,3 +224,5 @@ results/*/final_adapter/*.safetensors
 results/*/final_adapter/*.bin
 results/sft/adapter/*.safetensors
 results/sft/adapter/*.bin
+results/fair_rlvr/final_adapter/tokenizer.json
+results/sft/adapter/tokenizer.json
