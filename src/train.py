@@ -16,11 +16,9 @@ import json
 import random
 import yaml
 import torch
-from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 from peft import LoraConfig, TaskType
-from torch.utils.data import Sampler
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import GRPOConfig, GRPOTrainer
 from datasets import Dataset
@@ -28,61 +26,6 @@ from datasets import Dataset
 from src.data import create_splits, SYSTEM_PROMPT
 from src.reward import compute_reward, predicted_answer_text
 from src.callbacks import FairRLVRCallback, TrainingDynamicsLogger
-
-
-# ── Sibling-aware sampler ─────────────────────────────────
-
-class FamilyGroupedSampler(Sampler):
-    """
-    Shuffles the order of template families but keeps members of the same
-    family consecutive. This guarantees that siblings (same BBQ template,
-    different demographic fill) land in the same GRPOTrainer reward batch,
-    so the counterfactual-consistency bonus can actually fire.
-
-    Replaces the default RandomSampler, which scatters siblings across batches
-    regardless of how the dataset is sorted beforehand.
-    """
-
-    def __init__(self, dataset_family_keys: list, seed: int = 42):
-        families: dict = defaultdict(list)
-        for idx, key in enumerate(dataset_family_keys):
-            families[key].append(idx)
-        rng = random.Random(seed)
-        family_groups = list(families.values())
-        rng.shuffle(family_groups)
-        self._indices = [idx for group in family_groups for idx in group]
-
-    def __iter__(self):
-        return iter(self._indices)
-
-    def __len__(self):
-        return len(self._indices)
-
-
-class FairGRPOTrainer(GRPOTrainer):
-    """
-    GRPOTrainer that swaps in FamilyGroupedSampler so siblings always
-    co-appear in the same reward batch. Only activated when the dataset
-    has a template_family_key column and use_family_sampler=True.
-    """
-
-    def __init__(self, *args, use_family_sampler: bool = False, sampler_seed: int = 42, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._use_family_sampler = use_family_sampler
-        self._sampler_seed = sampler_seed
-
-    def _get_train_sampler(self, train_dataset=None):
-        dataset = train_dataset if train_dataset is not None else self.train_dataset
-        if (
-            self._use_family_sampler
-            and dataset is not None
-            and "template_family_key" in dataset.column_names
-        ):
-            return FamilyGroupedSampler(
-                dataset_family_keys=dataset["template_family_key"],
-                seed=self._sampler_seed,
-            )
-        return super()._get_train_sampler(train_dataset)
 
 
 # ── Reward wrapper for GRPOTrainer ────────────────────────
@@ -535,8 +478,8 @@ def train(
     )
 
     # ── Initialize trainer ────────────────────────────────
-    print("\nInitializing FairGRPOTrainer...")
-    trainer = FairGRPOTrainer(
+    print("\nInitializing GRPOTrainer...")
+    trainer = GRPOTrainer(
         model=base_model,
         args=training_config,
         train_dataset=train_dataset,
@@ -544,8 +487,6 @@ def train(
         peft_config=peft_config,
         processing_class=tokenizer,
         callbacks=[fair_callback],
-        use_family_sampler=(alpha_consistency > 0),
-        sampler_seed=seed,
     )
 
     # ── Train ─────────────────────────────────────────────
@@ -673,6 +614,8 @@ if __name__ == "__main__":
         "lora_r": _resolve(args.lora_r, "lora_r", 16),
         "lora_alpha": _resolve(args.lora_alpha, "lora_alpha", 32),
         "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),
+        "clip_ratio_low": _resolve(None, "clip_ratio_low", 0.20),
+        "clip_ratio_high": _resolve(None, "clip_ratio_high", 0.28),
         "lr_scheduler_type": _resolve(args.lr_scheduler, "lr_scheduler_type", "cosine"),
         "warmup_ratio": _resolve(args.warmup_ratio, "warmup_ratio", 0.05),
         # --no-4bit / --no-grad-checkpoint override config; otherwise read from config

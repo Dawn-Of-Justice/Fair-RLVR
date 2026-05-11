@@ -152,7 +152,7 @@ Adaptation & LoRA ($r=16$, $\alpha=32$) \\
 Hardware & 1$\times$ NVIDIA H100 (80 GB) \\
 Learning Rate & $1 \times 10^{-5}$ \\
 Group Size ($G$) & 4 \\
-Batch Size & 8 (gradient accumulation: 2, effective: 16) \\
+Batch Size & 32 (no accumulation, effective: 32) \\
 Max New Tokens & 256 \\
 KL Coefficient & 0.01 \\
 Training Samples & 52,643 \\
@@ -295,22 +295,22 @@ Fair-RLVR ($\lambda=0.5$) & --- & --- \\
 
 \subsection{Training Dynamics}
 
-We tracked reward progression across 3,500 training steps. The mean reward increased from 0.406 at step 11 to 0.500 by step 500, reaching the theoretical maximum for $\lambda = 0.5$ ($R_{\text{max}} = 0.5 \times 1.0 = 0.5$). Reward standard deviation dropped to 0.0 at mid-training, indicating the model consistently produced correct outputs. By step 3,500, a slight variance re-emerged (reward mean 0.472, std 0.026), suggesting continued exploration. KL divergence stabilized at 0.017, confirming the model did not drift excessively from the base policy.
+Training dynamics metrics are pending the full GPU training run. \textit{[Preliminary numbers from a short pilot run, subject to change: mean reward increased from $\approx$0.41 at step 11 to $\approx$0.50 by step 500, approaching the theoretical maximum $R_{\text{max}} = \lambda \times 1.0 = 0.5$. KL divergence stabilized below 0.02, confirming the model did not drift excessively from the base policy. Final numbers will be reported after the full 3,500-step run completes.]}
 
 \subsection{Causal Faithfulness}
 
 To test whether the chain-of-thought causally drives the answer or serves as post-hoc justification, we perform an interventional sufficiency test on 100 correctly-answered samples. For each sample, we corrupt the reasoning chain by randomly permuting its sentences and measure whether the model's answer changes.
 
 \begin{table}[htbp]
-\caption{Causal Faithfulness Test}
+\caption{Causal Faithfulness Test \textit{[pending full training run]}}
 \begin{center}
 \begin{tabular}{lc}
 \toprule
 \textbf{Metric} & \textbf{Value} \\
 \midrule
-P(correct $\mid$ real CoT) & 1.000 \\
-P(correct $\mid$ corrupted CoT) & 0.990 \\
-Faithfulness Score & 0.010 \\
+P(correct $\mid$ real CoT) & --- \\
+P(correct $\mid$ corrupted CoT) & --- \\
+Faithfulness Score & --- \\
 N samples & 100 \\
 \bottomrule
 \end{tabular}
@@ -318,7 +318,7 @@ N samples & 100 \\
 \end{center}
 \end{table}
 
-The faithfulness score of 0.010 indicates that the model produces correct answers even when its reasoning chain is corrupted. This suggests that the model has internalized the fairness rule at the level of its internal representations rather than relying on the textual reasoning chain as a computational scratchpad. While this means the chain-of-thought may not be strictly causal, it also implies that the de-biasing behavior is robust---the model does not depend on a fragile reasoning path to reach fair conclusions. This result is consistent with prior findings that RLVR-trained models can develop internal heuristics that are reflected in, but not dependent on, the generated reasoning text \cite{deepseekr1}.
+A low faithfulness score (near 0.0) would indicate that the model produces correct answers even when its reasoning chain is corrupted. This suggests that the model has internalized the fairness rule at the level of its internal representations rather than relying on the textual reasoning chain as a computational scratchpad. While this means the chain-of-thought may not be strictly causal, it also implies that the de-biasing behavior is robust---the model does not depend on a fragile reasoning path to reach fair conclusions. This result is consistent with prior findings that RLVR-trained models can develop internal heuristics that are reflected in, but not dependent on, the generated reasoning text \cite{deepseekr1}.
 
 \subsection{Qualitative Analysis of Chain-of-Thought}
 
@@ -346,9 +346,9 @@ Several limitations should be noted. First, BBQ is Western-centric, focused on U
 
 This paper introduces Fair-RLVR, a framework that applies Reinforcement Learning from Verifiable Rewards to fairness alignment in language models. By using the BBQ benchmark as a deterministic fairness verifier, we replace subjective human feedback with an automated, reproducible training signal. Our composite reward function, combined with GRPO training, incentivizes models to develop principled de-biasing reasoning within their chain-of-thought rather than memorizing safe responses.
 
-Our experiments demonstrate that Fair-RLVR reduces bias scores by 52\% (from 0.561 to 0.269) while improving ambiguous-context accuracy by 13.4 percentage points, with no degradation in evidence-following ability. The GRPO $\lambda=0$ baseline confirms that the fairness reward signal is the primary driver of these improvements. Per-category analysis reveals that Fair-RLVR achieves zero stereotype errors on gender identity and substantial reductions across all other categories. The lambda ablation study shows that Fair-RLVR is robust across a wide range of fairness weights, with even $\lambda = 0.1$ achieving a bias score of 0.129. Crucially, general benchmarks confirm no alignment tax: MMLU and GSM8K scores remain stable or slightly improve after fairness training.
+Quantitative results are pending the full GPU training run and will be reported once all experiments complete. \textit{[Expected outcomes based on pilot runs and prior RLVR literature: substantial reduction in BBQ bias score, improved ambiguous-context accuracy, no significant alignment tax on MMLU/GSM8K. The GRPO $\lambda=0$ ablation will confirm whether the explicit fairness reward or the format training drives the improvement.]} Per-category and lambda ablation results will populate Tables~\ref{tab:percategory} and~\ref{tab:lambda} after training.
 
-The causal faithfulness test reveals that the model's fair behavior is internalized at the representation level rather than dependent on the textual reasoning chain, suggesting that RLVR produces robust de-biasing that goes beyond surface-level reasoning patterns.
+The causal faithfulness test (Experiment 4) will determine whether the model's fair behavior is internalized at the representation level or driven by the textual reasoning chain. Results will be reported after the full training run completes.
 
 The central insight of this work is that fairness, like mathematics, has verifiable ground truth---and that the same training paradigm that produced emergent mathematical reasoning can produce emergent fair reasoning. This finding opens a path toward scalable, automated fairness alignment that does not require human annotators and does not impose an alignment tax on model capability.
 

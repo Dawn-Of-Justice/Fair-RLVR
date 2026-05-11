@@ -12,25 +12,21 @@ lambda_fair: 0.5
 alpha_consistency: 0.0  # set to 0.25 to enable counterfactual-consistency bonus
 
 # Training
-# Memory budget (H100 80GB, Qwen2.5-3B bf16):
-#   model ≈ 6 GB  |  reference model ≈ 6 GB  |  optimizer (LoRA only) ≈ 1 GB
-#   forward pass activations (grad-checkpoint): batch*G = 8*4 = 32 seqs × 256 tok ≈ 2 GB
-#   generation KV cache: 32 seqs × 256 tok ≈ 0.7 GB
-#   total ≈ ~16 GB — leaves ample headroom
+# Memory estimate (gradient_checkpointing=true):
+#   batch_size=32, group_size=4 → 128 seqs in forward pass
+#   baseline at batch=8,G=4 was 14GB → scaling to 128 seqs ≈ 56GB → fits in 80GB
 learning_rate: 1.0e-5
 lr_scheduler_type: "cosine"
 warmup_ratio: 0.05
 num_train_steps: 3500
 group_size: 4
-batch_size: 8
-gradient_accumulation: 2   # effective batch = 16 prompts → 64 completions per step
-max_new_tokens: 256        # BBQ reasoning fits in ~100 tokens; 256 gives headroom
+batch_size: 32
+gradient_accumulation: 1   # effective batch = 32 prompts → 128 completions per step
+max_new_tokens: 256
 kl_coeff: 0.01
 
-# Quantization — disabled: H100 can hold Qwen2.5-3B in bf16
 use_4bit: false
-# Gradient checkpointing: recomputes activations during backward; mandatory at these batch sizes
-gradient_checkpointing: true
+gradient_checkpointing: true   # required — stores no activations, recomputes during backward
 
 # DAPO asymmetric clipping (arXiv:2503.14476)
 clip_ratio_low: 0.20
@@ -48,4 +44,3 @@ seed: 42
 # Logging — set use_wandb: true or pass --wandb on the CLI
 use_wandb: false
 wandb_project: "fair-rlvr"
-# wandb_run_name: ""   # uncomment to set a fixed run name

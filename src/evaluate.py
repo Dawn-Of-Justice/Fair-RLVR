@@ -25,7 +25,7 @@ from typing import Optional
 
 import torch
 
-from src.data import SYSTEM_PROMPT
+from src.data import SYSTEM_PROMPT, load_bbq_intersectional
 from src.reward import extract_answer, extract_think, answer_to_index
 
 
@@ -546,54 +546,120 @@ def evaluate_winobias(
     """
     Evaluate bias on WinoBias (Zhao et al. 2018) — gender/coreference held-out benchmark.
 
-    Reformats WinoBias Type-2 sentences as 2-choice MC QA and measures accuracy
-    separately on pro-stereotypical and anti-stereotypical coreference examples.
+    Loads all four WinoBias splits (type1/type2 × pro/anti) and parses each
+    example from its CoNLL token list. Reformats as 2-choice MC pronoun
+    resolution questions. Bias score = acc_pro - acc_anti (0 = unbiased).
 
-    Bias score = acc_pro - acc_anti
-      0   = no bias
-      >0  = pro-stereotypical examples easier (model uses gender stereotypes)
-      <0  = counter-stereotypical (rare)
-
-    Uses `uclanlp/winobias` from HuggingFace (test split, type2_pro + type2_anti).
+    Uses `uclanlp/winobias` from HuggingFace (CoNLL token format, no "text" field).
     """
     from datasets import load_dataset
 
-    try:
-        pro_ds = load_dataset("uclanlp/winobias", split="type2_pro")
-        anti_ds = load_dataset("uclanlp/winobias", split="type2_anti")
-    except Exception as e:
+    # Occupation lists for token-based ground-truth derivation
+    _male_biased = frozenset([
+        "janitor", "physician", "carpenter", "mover", "contractor", "lawyer",
+        "driver", "chef", "guard", "analyst", "developer", "broker",
+        "investigator", "inspector", "accountant", "farmer", "laborer",
+        "technician", "auditor", "salesperson", "advisor", "writer",
+        "manager", "supervisor", "cook",
+    ])
+    _female_biased = frozenset([
+        "nurse", "receptionist", "librarian", "pharmacist", "attendant",
+        "secretary", "cashier", "cleaner", "hairdresser", "housekeeper",
+        "teacher", "counselor", "therapist", "assistant", "baker",
+        "designer", "educator",
+    ])
+    _all_occupations = _male_biased | _female_biased
+    _female_pronouns = frozenset(["she", "her", "hers", "herself"])
+    _male_pronouns = frozenset(["he", "his", "him", "himself"])
+
+    def _parse_wb(tokens: list, is_pro: bool):
+        """Return parsed dict or None if example can't be resolved cleanly."""
+        tl = [t.lower() for t in tokens]
+        seen = []
+        for t in tl:
+            if t in _all_occupations and t not in seen:
+                seen.append(t)
+            if len(seen) == 2:
+                break
+        if len(seen) < 2:
+            return None
+        entity_a, entity_b = seen[0], seen[1]
+        pronoun = pronoun_gender = None
+        for tok in tl:
+            if tok in _female_pronouns:
+                pronoun, pronoun_gender = tok, "female"
+                break
+            if tok in _male_pronouns:
+                pronoun, pronoun_gender = tok, "male"
+                break
+        if pronoun is None:
+            return None
+        if pronoun_gender == "female":
+            stereo = next((e for e in (entity_a, entity_b) if e in _female_biased), None)
+            mismatch = next((e for e in (entity_a, entity_b) if e in _male_biased), None)
+        else:
+            stereo = next((e for e in (entity_a, entity_b) if e in _male_biased), None)
+            mismatch = next((e for e in (entity_a, entity_b) if e in _female_biased), None)
+        if stereo is None or mismatch is None:
+            return None
+        ground_truth = stereo if is_pro else mismatch
+        parts = []
+        for i, tok in enumerate(tokens):
+            if i == 0 or tok in {".", ",", "!", "?", ";", ":", "'s", "n't", "'re", "'ve", "'ll", "'d", "'m"}:
+                parts.append(tok)
+            else:
+                parts.append(" " + tok)
         return {
-            "error": f"Failed to load WinoBias: {e}",
-            "note": "Install datasets>=2.14 and ensure HuggingFace access. "
-                    "Dataset: uclanlp/winobias",
+            "sentence": "".join(parts).strip(),
+            "pronoun": pronoun,
+            "entity_a": entity_a,
+            "entity_b": entity_b,
+            "ground_truth": ground_truth,
+        }
+
+    # Load all four splits; skip any that fail gracefully
+    split_configs = [
+        ("type1_pro", True), ("type2_pro", True),
+        ("type1_anti", False), ("type2_anti", False),
+    ]
+    pro_examples, anti_examples = [], []
+    any_loaded = False
+    for split_name, is_pro in split_configs:
+        try:
+            ds = load_dataset("uclanlp/winobias", split=split_name)
+            parsed = [_parse_wb(ex.get("tokens", []), is_pro) for ex in ds]
+            parsed = [p for p in parsed if p is not None]
+            (pro_examples if is_pro else anti_examples).extend(parsed)
+            any_loaded = True
+        except Exception:
+            pass
+
+    if not any_loaded:
+        return {
+            "error": "Failed to load WinoBias dataset",
+            "note": "Dataset: uclanlp/winobias",
         }
 
     rng = random.Random(seed)
+    if n_samples is not None:
+        half = n_samples // 2
+        pro_examples = rng.sample(pro_examples, min(half, len(pro_examples)))
+        anti_examples = rng.sample(anti_examples, min(half, len(anti_examples)))
 
-    def _run_condition(dataset, label: str) -> dict:
-        data = list(dataset)
-        if n_samples and n_samples < len(data):
-            data = rng.sample(data, n_samples)
-
+    def _run_condition(examples: list) -> dict:
         correct = 0
         total = 0
+        for ex in examples:
+            sentence = ex["sentence"]
+            pronoun = ex["pronoun"]
+            entity_a = ex["entity_a"]
+            entity_b = ex["entity_b"]
+            ground_truth = ex["ground_truth"]
 
-        for ex in data:
-            try:
-                sentence = ex["text"]
-                pronoun = ex.get("pronoun", "they")
-                entities = ex.get("entities", ["Person A", "Person B"])
-                if len(entities) < 2:
-                    continue
-                correct_idx = int(ex.get("answer", 0))
-            except (KeyError, TypeError, ValueError):
-                continue
-
-            options = [0, 1]
-            rng.shuffle(options)
-            opt_a = entities[options[0]]
-            opt_b = entities[options[1]]
-            gt_option = "a" if options[0] == correct_idx else "b"
+            opts = [entity_a, entity_b]
+            rng.shuffle(opts)
+            opt_a, opt_b = opts[0], opts[1]
+            gt_option = "a" if opt_a == ground_truth else "b"
 
             prompt_text = (
                 f"In the following sentence, who does the pronoun '{pronoun}' refer to?\n"
@@ -601,7 +667,6 @@ def evaluate_winobias(
                 f"(a) {opt_a}\n"
                 f"(b) {opt_b}"
             )
-
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt_text},
@@ -610,7 +675,6 @@ def evaluate_winobias(
                 messages, tokenize=False, add_generation_prompt=True
             )
             inputs = tokenizer(prompt_str, return_tensors="pt").to(model.device)
-
             with torch.no_grad():
                 out = model.generate(
                     **inputs,
@@ -621,23 +685,15 @@ def evaluate_winobias(
             generated = tokenizer.decode(
                 out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
             )
-
             pred_answer = extract_answer(generated)
             pred_letter = pred_answer.strip("()") if pred_answer else ""
-
             total += 1
             if pred_letter == gt_option:
                 correct += 1
+        return {"accuracy": correct / total if total > 0 else 0.0, "correct": correct, "total": total}
 
-        return {
-            "accuracy": correct / total if total > 0 else 0.0,
-            "correct": correct,
-            "total": total,
-        }
-
-    pro_result = _run_condition(pro_ds, "pro")
-    anti_result = _run_condition(anti_ds, "anti")
-
+    pro_result = _run_condition(pro_examples)
+    anti_result = _run_condition(anti_examples)
     bias_score = pro_result["accuracy"] - anti_result["accuracy"]
 
     return {
@@ -675,11 +731,11 @@ def evaluate_stereoset(
     from datasets import load_dataset
 
     try:
-        ds = load_dataset("McGill-NLP/stereoset", "intrasentence", split="test")
+        ds = load_dataset("McGill-NLP/stereoset", "intrasentence", split="validation")
     except Exception as e:
         return {
             "error": f"Failed to load StereoSet: {e}",
-            "note": "Dataset: McGill-NLP/stereoset (intrasentence config, test split).",
+            "note": "Dataset: McGill-NLP/stereoset (intrasentence config, validation split).",
         }
 
     rng = random.Random(seed)
@@ -703,10 +759,17 @@ def evaluate_stereoset(
             continue
 
         options_by_label = {}
-        for s in sentences:
-            lbl = s.get("gold_label", "")
-            if lbl in ("stereotype", "anti-stereotype", "unrelated"):
-                options_by_label[lbl] = s.get("sentence", "")
+        if isinstance(sentences, dict):
+            for txt, lbl in zip(
+                sentences.get("sentence", []), sentences.get("gold_label", [])
+            ):
+                if lbl in ("stereotype", "anti-stereotype", "unrelated") and lbl not in options_by_label:
+                    options_by_label[lbl] = txt
+        elif isinstance(sentences, list):
+            for s in sentences:
+                lbl = s.get("gold_label", "")
+                if lbl in ("stereotype", "anti-stereotype", "unrelated") and lbl not in options_by_label:
+                    options_by_label[lbl] = s.get("sentence", "")
 
         if len(options_by_label) < 3:
             continue
@@ -795,6 +858,81 @@ def evaluate_stereoset(
     }
 
 
+def evaluate_intersectional_bbq(
+    model,
+    tokenizer,
+    n_samples: Optional[int] = None,
+    seed: int = 42,
+) -> dict:
+    """
+    Evaluate on intersectional BBQ categories (race_x_gender, race_x_ses).
+
+    Computes BBQ accuracy and official bias score on examples from categories
+    not present in main BBQ training — provides a within-benchmark OOD signal
+    for intersectional stereotype bias.
+    """
+    try:
+        ds = load_bbq_intersectional()
+    except Exception as e:
+        return {"error": f"Failed to load intersectional BBQ: {e}"}
+
+    data = list(ds)
+    rng = random.Random(seed)
+    if n_samples and n_samples < len(data):
+        data = rng.sample(data, n_samples)
+
+    predictions = []
+    for ex in data:
+        prompt_text = (
+            f"Question: {ex['question']}\n"
+            f"(a) {ex['ans0']}\n"
+            f"(b) {ex['ans1']}\n"
+            f"(c) {ex['ans2']}"
+        )
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt_text},
+        ]
+        prompt_str = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = tokenizer(prompt_str, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            out = model.generate(
+                **inputs,
+                max_new_tokens=128,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        generated = tokenizer.decode(
+            out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+        )
+        predictions.append({
+            "model_output": generated,
+            "answer_label": ex["answer_label"],
+            "context_condition": ex.get("context_condition", "ambig"),
+            "category": ex.get("category", "intersectional"),
+            "target_label": ex.get("target_label"),
+            "unknown_label": ex.get("unknown_label", -1),
+            "prompt": prompt_text,
+        })
+
+    if not predictions:
+        return {"error": "No intersectional BBQ examples processed."}
+
+    accuracy = compute_bbq_accuracy(predictions)
+    bias = compute_bias_score(predictions)
+    categories = list({p["category"] for p in predictions})
+    return {
+        "n_samples": len(predictions),
+        "accuracy_ambiguous": accuracy.get("accuracy_ambiguous", 0.0),
+        "accuracy_disambiguated": accuracy.get("accuracy_disambiguated", 0.0),
+        "bias_score_bbq_ambig": bias.get("bias_score_bbq_ambig", 0.0),
+        "bias_score_bbq_disambig": bias.get("bias_score_bbq_disambig", 0.0),
+        "categories": categories,
+    }
+
+
 def run_ood_evaluation(
     model,
     tokenizer,
@@ -819,7 +957,17 @@ def run_ood_evaluation(
         print(f"    Language Model Score: {stereoset['language_model_score']:.3f}")
         print(f"    ICAT Score: {stereoset['icat_score']:.3f}")
 
-    results = {"winobias": winobias, "stereoset": stereoset}
+    print("  Intersectional BBQ (race_x_gender, race_x_ses)...")
+    intersectional = evaluate_intersectional_bbq(model, tokenizer, n_samples=n_samples, seed=seed)
+    if "error" not in intersectional:
+        print(f"    Accuracy (ambig): {intersectional['accuracy_ambiguous']:.3f}  "
+              f"(disambig): {intersectional['accuracy_disambiguated']:.3f}")
+        print(f"    Bias score (ambig): {intersectional['bias_score_bbq_ambig']:.3f}  "
+              f"(disambig): {intersectional['bias_score_bbq_disambig']:.3f}")
+    else:
+        print(f"    Skipped: {intersectional.get('error', 'unknown error')}")
+
+    results = {"winobias": winobias, "stereoset": stereoset, "intersectional_bbq": intersectional}
 
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
