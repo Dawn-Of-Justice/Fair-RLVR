@@ -76,9 +76,9 @@ def train_sft(
     train_ratio: float = 0.9,
     epochs: int = 3,
     lr: float = 2e-5,
-    batch_size: int = 4,
-    gradient_accumulation: int = 4,
-    eval_batch_size: int = 8,
+    batch_size: int = 16,
+    gradient_accumulation: int = 1,
+    eval_batch_size: int = 64,
     gradient_checkpointing: bool = True,
     lora_r: int = 16,
     lora_alpha: int = 32,
@@ -286,13 +286,13 @@ if __name__ == "__main__":
     parser.add_argument("--train-ratio", type=float, default=0.9)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=2e-5)
-    parser.add_argument("--batch-size", type=int, default=4,
+    parser.add_argument("--batch-size", type=int, default=16,
                         help="Per-device training micro-batch size")
-    parser.add_argument("--grad-accum", type=int, default=4,
+    parser.add_argument("--grad-accum", type=int, default=1,
                         help="Gradient accumulation steps. Effective batch = batch-size * grad-accum")
     parser.add_argument("--no-grad-checkpoint", action="store_true",
                         help="Disable gradient checkpointing. Faster (~30%%) but uses more VRAM")
-    parser.add_argument("--eval-batch-size", type=int, default=8,
+    parser.add_argument("--eval-batch-size", type=int, default=64,
                         help="Real GPU batch size for post-training eval (no gradients)")
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--output-dir", type=str, default="results/sft")

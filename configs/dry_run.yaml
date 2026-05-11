@@ -22,6 +22,10 @@ kl_coeff: 0.01
 clip_ratio_low: 0.20
 clip_ratio_high: 0.28
 
+# Quantization — disabled on H100; enable with use_4bit: true on smaller GPUs
+use_4bit: false
+gradient_checkpointing: false
+
 # LoRA — smaller rank for speed
 lora_r: 8
 lora_alpha: 16

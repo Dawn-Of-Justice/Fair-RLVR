@@ -20,8 +20,8 @@ def run_zero_shot(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
     train_ratio: float = 0.9,
     n_eval: int = None,
-    max_new_tokens: int = 256,
-    batch_size: int = 8,
+    max_new_tokens: int = 512,
+    batch_size: int = 64,
     output_dir: str = "results/baseline_model",
     device: str = "auto",
     seed: int = 42,
@@ -51,7 +51,7 @@ def run_zero_shot(
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,
         device_map=device,
         trust_remote_code=True,
         attn_implementation="sdpa",
@@ -155,8 +155,8 @@ if __name__ == "__main__":
                         help="Must match the ratio used during training to get the same eval split")
     parser.add_argument("--n-eval", type=int, default=None,
                         help="Max eval samples (default: full 10%% split)")
-    parser.add_argument("--max-tokens", type=int, default=256)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--output-dir", type=str, default="results/baseline_model")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=42,

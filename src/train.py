@@ -535,6 +535,7 @@ def train(
         peft_config=peft_config,
         processing_class=tokenizer,
         callbacks=[fair_callback],
+        model_init_kwargs=model_kwargs,   # applies BitsAndBytesConfig when use_4bit=True
         use_family_sampler=(alpha_consistency > 0),
         sampler_seed=seed,
     )
@@ -666,8 +667,9 @@ if __name__ == "__main__":
         "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),
         "lr_scheduler_type": _resolve(args.lr_scheduler, "lr_scheduler_type", "cosine"),
         "warmup_ratio": _resolve(args.warmup_ratio, "warmup_ratio", 0.05),
-        "use_4bit": not args.no_4bit,
-        "gradient_checkpointing": not args.no_grad_checkpoint,
+        # --no-4bit / --no-grad-checkpoint override config; otherwise read from config
+        "use_4bit": False if args.no_4bit else config_overrides.get("use_4bit", True),
+        "gradient_checkpointing": False if args.no_grad_checkpoint else config_overrides.get("gradient_checkpointing", True),
         "output_dir": _resolve(args.output_dir, "output_dir", "results/fair_rlvr"),
         "save_steps": _resolve(args.save_steps, "save_steps", 500),
         "seed": _resolve(args.seed, "seed", 42),
