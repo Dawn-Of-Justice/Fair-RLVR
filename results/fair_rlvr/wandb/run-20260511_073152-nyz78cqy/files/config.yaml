@@ -1,0 +1,121 @@
+_wandb:
+    value:
+        cli_version: 0.26.1
+        e:
+            ykoi3q932hwqyq7jfeq3aft6dqyh4xax:
+                args:
+                    - --config
+                    - configs/fair_rlvr.yaml
+                    - --wandb
+                    - --wandb-project
+                    - fair-rlvr
+                cpu_count: 13
+                cpu_count_logical: 26
+                cudaVersion: "12.8"
+                disk:
+                    /:
+                        total: "2930253778944"
+                        used: "72557981696"
+                email: salosoja@gmail.com
+                executable: /home/zeus/miniconda3/envs/cloudspace/bin/python
+                git:
+                    commit: 3a4a3a07189792ee9e831f531b212f88c40a17cc
+                    remote: https://github.com/Dawn-Of-Justice/Fair-RLVR
+                gpu: NVIDIA H100 80GB HBM3
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-d277be8d-09e6-903e-454c-4133cc9e986a
+                host: 192-222-52-142
+                memory:
+                    total: "237490958336"
+                os: Linux-6.8.0-60-generic-x86_64-with-glibc2.39
+                program: -m src.train
+                python: CPython 3.12.11
+                root: results/fair_rlvr
+                startedAt: "2026-05-11T07:31:52.561984Z"
+                writerId: ykoi3q932hwqyq7jfeq3aft6dqyh4xax
+        m: []
+        python_version: 3.12.11
+        t:
+            "1":
+                - 1
+                - 5
+                - 11
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 84
+                - 98
+            "2":
+                - 1
+                - 5
+                - 11
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 84
+                - 98
+            "3":
+                - 13
+                - 16
+            "4": 3.12.11
+            "5": 0.26.1
+            "6": 5.8.0
+            "12": 0.26.1
+            "13": linux-x86_64
+alpha_consistency:
+    value: 0
+batch_size:
+    value: 32
+clip_ratio_high:
+    value: 0.28
+clip_ratio_low:
+    value: 0.2
+dry_run:
+    value: false
+gradient_accumulation:
+    value: 1
+gradient_checkpointing:
+    value: false
+group_size:
+    value: 4
+kl_coeff:
+    value: 0.01
+lambda_fair:
+    value: 0.5
+learning_rate:
+    value: 1e-05
+lora_alpha:
+    value: 32
+lora_r:
+    value: 16
+lr_scheduler_type:
+    value: cosine
+max_new_tokens:
+    value: 512
+model_name:
+    value: Qwen/Qwen2.5-3B-Instruct
+num_train_steps:
+    value: 3500
+seed:
+    value: 42
+train_ratio:
+    value: 0.9
+use_4bit:
+    value: false
+use_wandb:
+    value: true
+wandb_project:
+    value: fair-rlvr
+wandb_run_name:
+    value: null
+warmup_ratio:
+    value: 0.05

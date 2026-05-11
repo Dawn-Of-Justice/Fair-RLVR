@@ -18,9 +18,9 @@ alpha_consistency: 0.0  # set to 0.25 to enable counterfactual-consistency bonus
 learning_rate: 1.0e-5
 lr_scheduler_type: "cosine"
 warmup_ratio: 0.05
-num_train_steps: 3500
+num_train_steps: 1000
 group_size: 4
-batch_size: 32
+batch_size: 176
 gradient_accumulation: 1   # effective batch = 32 prompts → 128 completions per step
 max_new_tokens: 256
 kl_coeff: 0.01
@@ -33,7 +33,7 @@ clip_ratio_low: 0.20
 clip_ratio_high: 0.28
 
 # LoRA
-lora_r: 16
+lora_r: 32
 lora_alpha: 32
 
 # Output
