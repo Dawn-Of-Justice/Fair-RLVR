@@ -72,18 +72,17 @@ class FairGRPOTrainer(GRPOTrainer):
         self._sampler_seed = sampler_seed
 
     def _get_train_sampler(self, train_dataset=None):
-      dataset = train_dataset if train_dataset is not None else self.train_dataset
-      if (
-          self._use_family_sampler
-          and dataset is not None
-          and "template_family_key" in dataset.column_names
-      ):
-          return FamilyGroupedSampler(
-              dataset_family_keys=dataset["template_family_key"],
-              seed=self._sampler_seed,
-          )
-      return super()._get_train_sampler(train_dataset)
-
+        dataset = train_dataset if train_dataset is not None else self.train_dataset
+        if (
+            self._use_family_sampler
+            and dataset is not None
+            and "template_family_key" in dataset.column_names
+        ):
+            return FamilyGroupedSampler(
+                dataset_family_keys=dataset["template_family_key"],
+                seed=self._sampler_seed,
+            )
+        return super()._get_train_sampler(train_dataset)
 
 
 # ── Reward wrapper for GRPOTrainer ────────────────────────
@@ -92,61 +91,24 @@ def make_reward_fn(
     ground_truth_map: dict,
     lambda_fair: float = 0.5,
     alpha_consistency: float = 0.0,
-<<<<<<< HEAD
-    family_map: Optional[dict] = None,
-=======
     callback=None,
     profile: bool = False,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 ):
     """
     Create a reward function compatible with TRL's GRPOTrainer.
 
-<<<<<<< HEAD
-    GRPOTrainer calls: reward_fn(completions, prompts=prompts)
-=======
     GRPOTrainer calls: reward_fn(completions, prompts=prompts, **dataset_columns)
     Extra dataset columns (category, context_condition, unknown_label,
     template_family_key, ans0/ans1/ans2) are forwarded via kwargs when
     remove_unused_columns=False is set in GRPOConfig.
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
     Args:
-        ground_truth_map: dict mapping formatted prompt text → ground truth label index
+        ground_truth_map: dict mapping formatted prompt text -> ground truth label index
         lambda_fair: fairness reward weight
-<<<<<<< HEAD
-        alpha_consistency: counterfactual consistency bonus weight (0 = off)
-        family_map: dict mapping formatted prompt text → (category, question_index) for sibling lookup
-    """
-    def reward_fn(completions, **kwargs):
-        prompts = kwargs.get("prompts", [])
-
-        # Build a prompt→completion map for sibling lookup within this batch
-        prompt_to_completion = {}
-        prompt_to_family = {}
-        for i, (completion, prompt_text) in enumerate(zip(completions, prompts)):
-            prompt_to_completion[prompt_text] = completion
-            if family_map:
-                prompt_to_family[prompt_text] = family_map.get(prompt_text)
-
-        # Group prompts by template family for consistency reward
-        family_groups = defaultdict(list)
-        if alpha_consistency > 0 and family_map:
-            for prompt_text in prompts:
-                fam = family_map.get(prompt_text)
-                if fam is not None:
-                    family_groups[fam].append(prompt_text)
-
-        rewards = []
-=======
         alpha_consistency: counterfactual-consistency bonus weight (0.0 disables)
-        callback: optional FairRLVRCallback — if provided, log_generation_batch()
+        callback: optional FairRLVRCallback; if provided, log_generation_batch()
                   is called each step so phase tracking and CoT logs are populated
-        profile: if True, print per-call timing of generation phase + reward phase.
-                 Use to diagnose batch_size scaling. The "gen+train" line is the
-                 wall-clock between reward calls, ≈ GPU work (generation + loss +
-                 backward + optimizer.step()) for one micro-batch. The "reward"
-                 line is CPU post-processing time inside this function.
+        profile: if True, print per-call timing of generation+reward phases.
     """
     import time
     timer_state = {"last_call_end": None, "call_count": 0}
@@ -169,10 +131,8 @@ def make_reward_fn(
         ans1 = kwargs.get("ans1", [None] * len(completions))
         ans2 = kwargs.get("ans2", [None] * len(completions))
 
-        # ── Pre-compute predicted answer text per completion (for sibling pairing) ──
-        # Map family_key → list of (completion_idx, predicted_text). Predictions
-        # from completions where the prompt is from the SAME template family but
-        # a different demographic fill are the "siblings" used for consistency.
+        # Pre-compute predicted answer text per completion (for sibling pairing).
+        # Map family_key -> list of (completion_idx, predicted_text, prompt).
         family_predictions: dict = {}
         per_completion_text: list = []
         for i, completion in enumerate(completions):
@@ -181,53 +141,24 @@ def make_reward_fn(
             per_completion_text.append(txt)
             key = family_keys[i] if i < len(family_keys) else None
             if alpha_consistency > 0 and key is not None:
-                family_predictions.setdefault(key, []).append((i, txt, prompts[i] if i < len(prompts) else None))
+                family_predictions.setdefault(key, []).append(
+                    (i, txt, prompts[i] if i < len(prompts) else None)
+                )
 
         rewards = []
         labels = []
-        # Per-completion compute_reward outputs, used to forward to the callback
-        # so it doesn't recompute (and so logged r_consistency reflects the actual
-        # training-time alpha_consistency, not a default-0 recomputation).
         results: list = []
         n_with_siblings = 0
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
+
         for i, completion in enumerate(completions):
             prompt_text = prompts[i] if i < len(prompts) else ""
             label = ground_truth_map.get(prompt_text, -1)
 
             if label == -1:
-<<<<<<< HEAD
-                # No ground truth found — format-only fallback; log warning
-                print(f"[WARNING] No ground truth for prompt (truncated): {prompt_text[:80]!r}")
-                from src.reward import penalty_structural
-                rewards.append(-penalty_structural(completion))
-                continue
-
-            # Gather sibling completions (same template family, different demographic fill)
-            sibling_texts = []
-            if alpha_consistency > 0 and family_map:
-                fam = family_map.get(prompt_text)
-                if fam is not None:
-                    for sib_prompt in family_groups.get(fam, []):
-                        if sib_prompt != prompt_text and sib_prompt in prompt_to_completion:
-                            sibling_texts.append(prompt_to_completion[sib_prompt])
-
-            result = compute_reward(
-                text=completion,
-                ground_truth_label=label,
-                lambda_fair=lambda_fair,
-                alpha_consistency=alpha_consistency,
-                sibling_texts=sibling_texts,
-            )
-            rewards.append(result["r_total"])
-=======
                 print(f"[WARNING] Ground truth not found for prompt (step {i}). Returning 0.")
                 rewards.append(0.0)
                 results.append(None)
             else:
-                # Sibling answer texts: predictions in the SAME family but from a
-                # DIFFERENT prompt (different demographic fill). Skip same-prompt
-                # entries (those are GRPO's G group-mates, not counterfactuals).
                 sibling_texts: list = []
                 if alpha_consistency > 0:
                     key = family_keys[i] if i < len(family_keys) else None
@@ -253,19 +184,16 @@ def make_reward_fn(
                 results.append(result)
             labels.append(label)
 
-        # Wire into callback for live phase tracking and CoT logging.
-        # Use callback.current_step (set in on_step_end) so the step number
-        # stays in sync with trainer.global_step rather than a separate counter.
-        # Forward the precomputed `results` so the callback doesn't redo work
-        # (and so r_consistency in batch_logs reflects the real alpha used here).
         if callback is not None:
             step = callback.current_step
             sibling_hit_rate = n_with_siblings / len(completions) if completions else 0.0
-            valid = [(c, l, cat, cond, unk, tgt, r)
-                     for c, l, cat, cond, unk, tgt, r
-                     in zip(completions, labels, categories, context_conditions,
-                            unknown_labels, target_labels, results)
-                     if l != -1]
+            valid = [
+                (c, l, cat, cond, unk, tgt, r)
+                for c, l, cat, cond, unk, tgt, r
+                in zip(completions, labels, categories, context_conditions,
+                       unknown_labels, target_labels, results)
+                if l != -1 and r is not None
+            ]
             if valid:
                 (v_completions, v_labels, v_cats, v_conds,
                  v_unks, v_tgts, v_results) = zip(*valid)
@@ -289,7 +217,6 @@ def make_reward_fn(
             timer_state["last_call_end"] = t_end
             print(f"[profile] reward fn:       {reward_time:.3f}s "
                   f"(call #{timer_state['call_count']})")
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
         return rewards
 
@@ -298,39 +225,31 @@ def make_reward_fn(
 
 # ── Dataset formatting for GRPOTrainer ────────────────────
 
-<<<<<<< HEAD
 def build_grpo_dataset(
     split_data,
     tokenizer,
     sort_by_family: bool = False,
 ) -> tuple[Dataset, dict, dict]:
-=======
-def build_grpo_dataset(split_data, tokenizer, sort_by_family: bool = True) -> tuple[Dataset, dict]:
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     """
     Build a dataset for GRPOTrainer and ground truth / family lookup maps.
 
     Args:
         split_data: BBQ split (HuggingFace Dataset)
         tokenizer: tokenizer for applying chat template
-        sort_by_family: if True, sort by question_index so sibling variants
+        sort_by_family: if True, sort by template_family_key so sibling variants
             land in adjacent positions (needed for R_consistency)
 
     Each row also exposes:
       - template_family_key: f"{category}:{question_index}:{context_condition}"
         Used by the counterfactual-consistency reward to identify siblings
         (same template, different demographic fill) within a batch.
-      - ans0/ans1/ans2: option text strings, used to map (a)/(b)/(c) →
+      - ans0/ans1/ans2: option text strings, used to map (a)/(b)/(c) ->
         canonical answer text for cross-variant comparison.
-
-    When sort_by_family=True (default), the dataset is reordered so that
-    siblings end up in adjacent rows, maximizing the chance they appear in
-    the same GRPO reward batch and the consistency bonus actually fires.
 
     Returns:
         (dataset, ground_truth_map, family_map) where:
-        - ground_truth_map: formatted prompt → answer label index
-        - family_map: formatted prompt → (category, question_index)
+        - ground_truth_map: formatted prompt -> answer label index
+        - family_map: formatted prompt -> (category, question_index)
     """
     records = []
     ground_truth_map = {}
@@ -348,10 +267,6 @@ def build_grpo_dataset(split_data, tokenizer, sort_by_family: bool = True) -> tu
 
         category = example["category"]
         condition = example["context_condition"]
-        # Use the key resolved by create_splits() — it already handled the
-        # question_index-vs-question-text fallback. Reconstructing from raw
-        # question_index here would silently use a row counter when question_index
-        # is not a template ID, producing singleton families and no sibling pairs.
         family_key = example.get("template_family_key", f"{category}:{condition}")
 
         records.append({
@@ -359,10 +274,7 @@ def build_grpo_dataset(split_data, tokenizer, sort_by_family: bool = True) -> tu
             "category": category,
             "context_condition": condition,
             "unknown_label": example.get("unknown_label", -1),
-            # target_label = BBQ stereotype-aligned answer index (or -1 if absent).
-            # Kept for API compatibility with compute_reward(); not used in reward formula.
             "target_label": example.get("target_label", -1) if example.get("target_label") is not None else -1,
-            # Counterfactual-consistency support
             "template_family_key": family_key,
             "ans0": example.get("ans0", "") or "",
             "ans1": example.get("ans1", "") or "",
@@ -373,12 +285,10 @@ def build_grpo_dataset(split_data, tokenizer, sort_by_family: bool = True) -> tu
         family_map[prompt_str] = (example["category"], example.get("question_index", -1))
 
     if sort_by_family:
-        # Adjacency = sibling co-batching. Stable sort on the family key.
         records.sort(key=lambda r: r["template_family_key"])
 
     dataset = Dataset.from_list(records)
 
-    # Validate coverage
     n_missing = sum(1 for r in records if ground_truth_map.get(r["prompt"], -1) == -1)
     if n_missing > 0:
         print(f"[WARNING] {n_missing} training prompts have no ground truth label.")
@@ -390,12 +300,7 @@ def build_grpo_dataset(split_data, tokenizer, sort_by_family: bool = True) -> tu
 
 def train(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
-<<<<<<< HEAD
-    n_train: Optional[int] = None,
-    n_eval: Optional[int] = None,
-=======
     train_ratio: float = 0.9,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     lambda_fair: float = 0.5,
     alpha_consistency: float = 0.0,
     learning_rate: float = 1e-5,
@@ -403,11 +308,7 @@ def train(
     group_size: int = 2,
     batch_size: int = 8,
     gradient_accumulation: int = 2,
-<<<<<<< HEAD
     max_new_tokens: int = 512,
-=======
-    max_new_tokens: int = 256,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     lora_r: int = 16,
     lora_alpha: int = 32,
     kl_coeff: float = 0.01,
@@ -423,33 +324,20 @@ def train(
     seed: int = 42,
     use_wandb: bool = False,
     wandb_project: str = "fair-rlvr",
-    wandb_run_name: str = None,
-    dry_run: bool = False,
-<<<<<<< HEAD
-    use_wandb: bool = False,
-    wandb_project: str = "fair-rlvr",
     wandb_run_name: Optional[str] = None,
-=======
+    dry_run: bool = False,
     profile: bool = False,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 ):
     """
     Train Fair-RLVR with GRPO.
 
     Args:
         model_name: HuggingFace model name
-<<<<<<< HEAD
-        n_train: training samples (None = full dataset, ~52,643)
-        n_eval: eval samples per condition (None = full eval split)
-        lambda_fair: fairness reward weight
-        alpha_consistency: counterfactual consistency bonus weight (0 = off)
-=======
         train_ratio: fraction of full BBQ dataset used for training (default 0.9)
         lambda_fair: fairness reward weight
         alpha_consistency: counterfactual-consistency bonus weight
             (Ravulu et al. 2024 CDA, adapted to RLVR). Default 0.0 (disabled).
             Recommended: 0.25.
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         learning_rate: learning rate
         num_train_steps: total training steps
         group_size: G — number of completions per prompt (default 2 for 3-choice MCQA)
@@ -459,38 +347,21 @@ def train(
         lora_r: LoRA rank
         lora_alpha: LoRA alpha scaling
         kl_coeff: KL divergence coefficient
-<<<<<<< HEAD
-        clip_ratio_high: DAPO high clip ratio (ε_high=0.28)
-        clip_ratio_low: DAPO low clip ratio (ε_low=0.20)
-        use_4bit: use 4-bit NF4 quantization
+        clip_ratio_high: DAPO high clip ratio (epsilon_high)
+        clip_ratio_low: DAPO low clip ratio (epsilon)
+        lr_scheduler_type: HuggingFace scheduler name (default: cosine)
+        warmup_ratio: fraction of steps for LR warmup (default 0.05)
+        use_4bit: use 4-bit quantization
+        gradient_checkpointing: recompute activations during backward (saves VRAM)
         output_dir: directory to save model and results
         save_steps: save checkpoint every N steps
         logging_steps: log every N steps
         seed: random seed (must be 42 across all scripts)
-=======
-        clip_ratio_high: DAPO high clip ratio
-        clip_ratio_low: DAPO low clip ratio
-        lr_scheduler_type: HuggingFace scheduler name. "cosine" (default) reaches
-            ~0 at the end but decays slowly early, unlike "linear" which halves LR
-            by the midpoint. For very short runs use "constant_with_warmup".
-        warmup_ratio: fraction of steps used for LR warmup (default 0.05).
-            Stabilises early training when the model is still learning format.
-        use_4bit: use 4-bit quantization
-        gradient_checkpointing: trade compute for VRAM by recomputing activations
-            during backward (default True). Set False for ~30% speedup when VRAM
-            is not the bottleneck.
-        output_dir: directory to save model and results
-        save_steps: save checkpoint every N steps
-        logging_steps: log every N steps
-        seed: random seed
         use_wandb: enable Weights & Biases logging (requires `pip install wandb`)
         wandb_project: W&B project name (default: "fair-rlvr")
         wandb_run_name: W&B run name; if None, W&B auto-generates one
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         dry_run: if True, run only 5 steps to test pipeline
-        use_wandb: enable Weights & Biases logging
-        wandb_project: W&B project name
-        wandb_run_name: W&B run name (auto-generated from config if None)
+        profile: if True, print per-call timing inside reward function
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -537,7 +408,6 @@ def train(
 
     # ── Weights & Biases ──────────────────────────────────
     if use_wandb:
-<<<<<<< HEAD
         try:
             import wandb
             run_name = wandb_run_name or f"lambda{lambda_fair}_alpha{alpha_consistency}_G{group_size}"
@@ -551,26 +421,15 @@ def train(
         except ImportError:
             print("[WARNING] wandb not installed — disabling W&B. Run: pip install wandb")
             use_wandb = False
-=======
-        import wandb
-        wandb.init(
-            project=wandb_project,
-            name=wandb_run_name,
-            config=config,
-            dir=str(output_path),
-        )
-        print(f"W&B run: {wandb.run.url}")
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
     # ── Load tokenizer ────────────────────────────────────
     print(f"\nLoading tokenizer: {model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"  # Required for generation
+    tokenizer.padding_side = "left"
 
-    # ── Load model ────────────────────────────────────────
-    print(f"Loading model: {model_name}")
+    # ── Model kwargs ──────────────────────────────────────
     model_kwargs = {
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16,
@@ -595,19 +454,13 @@ def train(
     )
 
     # ── Load data ─────────────────────────────────────────
-<<<<<<< HEAD
     print("\nLoading BBQ dataset...")
     sort_by_family = alpha_consistency > 0
     splits = create_splits(
-        n_train=n_train,
-        n_eval=n_eval,
+        train_ratio=train_ratio,
         seed=seed,
         sort_by_family=sort_by_family,
     )
-=======
-    print("\nLoading BBQ dataset (full 90/10 split)...")
-    splits = create_splits(train_ratio=train_ratio, seed=seed)
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
     train_dataset, ground_truth_map, family_map = build_grpo_dataset(
         splits["train"],
@@ -619,45 +472,28 @@ def train(
     print(f"Ground truth map entries: {len(ground_truth_map)}")
 
     # ── Callbacks ─────────────────────────────────────────
-    dynamics_logger = TrainingDynamicsLogger(
-        output_dir=str(output_path / "dynamics"),
-    )
-    fair_callback = FairRLVRCallback(
-        output_dir=str(output_path / "logs"),
-        cot_checkpoint_steps=[100, 500, 1000, 1500, 2000, 2500, 3000, 3500],
-        dynamics_logger=dynamics_logger,
-    )
-
-    # ── Reward function ───────────────────────────────────
-    # Pass the callback so log_generation_batch() is called from inside the
-    # reward function — the only place GRPOTrainer exposes raw completions.
-    reward_fn = make_reward_fn(
-        ground_truth_map=ground_truth_map,
-        lambda_fair=lambda_fair,
-        alpha_consistency=alpha_consistency,
-<<<<<<< HEAD
-        family_map=family_map if alpha_consistency > 0 else None,
-    )
-
-    # ── Callbacks ─────────────────────────────────────────
-    # Scale checkpoint steps proportionally to num_train_steps
     cot_steps = [
         int(num_train_steps * frac)
         for frac in [0.03, 0.14, 0.29, 0.43, 0.57, 0.71, 0.86, 1.0]
         if int(num_train_steps * frac) > 0
     ]
-    fair_callback = FairRLVRCallback(
-        output_dir=str(output_path / "logs"),
-        cot_checkpoint_steps=cot_steps,
-        use_wandb=use_wandb,
-    )
     dynamics_logger = TrainingDynamicsLogger(
         output_dir=str(output_path / "dynamics"),
         use_wandb=use_wandb,
-=======
+    )
+    fair_callback = FairRLVRCallback(
+        output_dir=str(output_path / "logs"),
+        cot_checkpoint_steps=cot_steps,
+        dynamics_logger=dynamics_logger,
+    )
+
+    # ── Reward function ───────────────────────────────────
+    reward_fn = make_reward_fn(
+        ground_truth_map=ground_truth_map,
+        lambda_fair=lambda_fair,
+        alpha_consistency=alpha_consistency,
         callback=fair_callback,
         profile=profile,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     )
 
     # ── GRPO Config ───────────────────────────────────────
@@ -671,49 +507,22 @@ def train(
         learning_rate=learning_rate,
         num_generations=group_size,
         max_completion_length=max_new_tokens,
-<<<<<<< HEAD
-        # KL regularization
         beta=kl_coeff,
         # DAPO asymmetric clipping (requires TRL >=0.12)
         epsilon=clip_ratio_low,
         epsilon_high=clip_ratio_high,
-=======
-        # KL and DAPO asymmetric clipping
-        # epsilon      = low clip ratio  (standard lower bound)
-        # epsilon_high = high clip ratio (DAPO "Clip-Higher" strategy)
-        # Requires TRL >= 0.16 (epsilon_high added in 0.16.0).
-        beta=kl_coeff,
-        epsilon=clip_ratio_low,
-        epsilon_high=clip_ratio_high,
         lr_scheduler_type=lr_scheduler_type,
         warmup_ratio=warmup_ratio,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
-        # Logging and saving
         logging_steps=logging_steps,
         save_steps=save_steps,
         save_total_limit=3,
-        # Generation
         temperature=0.7,
         top_p=0.9,
-        # Training
         bf16=True,
         seed=seed,
         report_to="wandb" if use_wandb else "none",
         remove_unused_columns=False,
-<<<<<<< HEAD
-        gradient_checkpointing=True,
-=======
-        # Gradient checkpointing for memory efficiency (toggle via --no-grad-checkpoint)
         gradient_checkpointing=gradient_checkpointing,
-        # Optimizer: paged_adamw_8bit stores optimizer states in 8-bit and
-        # pages them to CPU when VRAM is tight — a good match for 4-bit weights.
-        optim="paged_adamw_8bit",
-        # Overlap data loading with GPU compute on cloud instances (0 = serial).
-        dataloader_num_workers=4,
-        dataloader_pin_memory=True,
-        # model_init_kwargs belongs on GRPOConfig (not GRPOTrainer) per TRL >= 0.16
-        model_init_kwargs=model_kwargs,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     )
 
     # ── Initialize trainer ────────────────────────────────
@@ -731,33 +540,20 @@ def train(
     )
 
     # ── Train ─────────────────────────────────────────────
-<<<<<<< HEAD
+    effective_batch = batch_size * gradient_accumulation
     print("\n" + "=" * 55)
     print(f"Starting Fair-RLVR Training")
+    print(f"  Reward: R_total = λ · R_fairness + α · R_consistency - P_structural")
     print(f"  Model:          {model_name}")
     print(f"  Steps:          {num_train_steps}")
     print(f"  λ (fairness):   {lambda_fair}")
-    print(f"  α (consistency):{alpha_consistency}")
+    print(f"  α (consistency):{alpha_consistency} ({'on' if alpha_consistency > 0 else 'off'})")
     print(f"  Group size G:   {group_size}")
-    print(f"  Clip (low/high):{clip_ratio_low}/{clip_ratio_high}")
-    print(f"  4-bit:          {use_4bit}")
-    print("=" * 55 + "\n")
-=======
-    effective_batch = batch_size * gradient_accumulation
-    print("\n" + "=" * 50)
-    print(f"Starting Fair-RLVR Training")
-    print(f"  Reward: R_total = λ · R_fairness + α · R_consistency - P_structural")
-    print(f"  Model: {model_name}")
-    print(f"  Steps: {num_train_steps}")
-    print(f"  λ (fairness reward weight): {lambda_fair}")
-    print(f"  α (consistency bonus weight): {alpha_consistency} "
-          f"({'on' if alpha_consistency > 0 else 'off'})")
-    print(f"  Group size: {group_size}")
     print(f"  Micro-batch: {batch_size}, grad-accum: {gradient_accumulation}, "
           f"effective batch: {effective_batch}")
+    print(f"  Clip (low/high):{clip_ratio_low}/{clip_ratio_high}")
     print(f"  4-bit: {use_4bit} | grad-checkpoint: {'on' if gradient_checkpointing else 'off'}")
-    print("=" * 50 + "\n")
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
+    print("=" * 55 + "\n")
 
     trainer.train()
 
@@ -795,120 +591,57 @@ def load_config(config_path: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Fair-RLVR with GRPO")
 
-    # Config file (overrides defaults)
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
 
-    # Model
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--no-4bit", action="store_true", help="Disable 4-bit quantization")
     parser.add_argument("--no-grad-checkpoint", action="store_true",
-                        help="Disable gradient checkpointing. Faster (~30%%) but uses more VRAM")
+                        help="Disable gradient checkpointing (~30%% faster but uses more VRAM)")
 
-    # Data
-<<<<<<< HEAD
-    parser.add_argument("--n-train", type=int, default=None,
-                        help="Training samples (default: full dataset ~52,643)")
-    parser.add_argument("--n-eval", type=int, default=None,
-                        help="Eval samples per condition (default: full eval split)")
-
-    # Reward
-    parser.add_argument("--lambda-fair", type=float, default=0.5)
-    parser.add_argument("--alpha-consistency", type=float, default=0.0,
-                        help="Counterfactual consistency bonus weight (0 = off)")
-
-    # Training
-    parser.add_argument("--lr", type=float, default=1e-5)
-    parser.add_argument("--steps", type=int, default=3500)
-    parser.add_argument("--group-size", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--grad-accum", type=int, default=2)
-    parser.add_argument("--kl-coeff", type=float, default=0.01)
-=======
     parser.add_argument("--train-ratio", type=float, default=None,
                         help="Fraction of BBQ used for training (default 0.9)")
 
-    # Reward
     parser.add_argument("--lambda-fair", type=float, default=None)
     parser.add_argument("--alpha-consistency", type=float, default=None,
                         help="Counterfactual-consistency bonus weight (default 0.0 = off; "
                              "0.25 is the recommended on value)")
 
-    # Training
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--lr-scheduler", type=str, default=None,
-                        help="HuggingFace scheduler type (default: cosine). "
-                             "Options: cosine, linear, constant, constant_with_warmup, "
-                             "cosine_with_restarts, polynomial. "
-                             "Use 'constant_with_warmup' for very short runs.")
-    parser.add_argument("--warmup-ratio", type=float, default=None,
-                        help="Fraction of steps for LR warmup (default: 0.05).")
+                        help="HuggingFace scheduler type (default: cosine)")
+    parser.add_argument("--warmup-ratio", type=float, default=None)
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--group-size", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--grad-accum", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=None)
     parser.add_argument("--kl-coeff", type=float, default=None)
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
-    # LoRA
     parser.add_argument("--lora-r", type=int, default=None)
     parser.add_argument("--lora-alpha", type=int, default=None)
 
-    # Output
-<<<<<<< HEAD
-    parser.add_argument("--output-dir", type=str, default="results/fair_rlvr")
-    parser.add_argument("--save-steps", type=int, default=500)
-    parser.add_argument("--seed", type=int, default=42)
-=======
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--save-steps", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
 
-    # Logging
     parser.add_argument("--wandb", action="store_true", dest="use_wandb",
                         help="Enable Weights & Biases logging")
     parser.add_argument("--wandb-project", type=str, default=None,
                         help="W&B project name (default: fair-rlvr)")
     parser.add_argument("--wandb-run", type=str, default=None,
                         help="W&B run name (default: auto-generated by W&B)")
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
-    # Modes
     parser.add_argument("--dry-run", action="store_true", help="Run 5 steps to test pipeline")
     parser.add_argument("--profile", action="store_true",
-                        help="Print per-call timing of generation+train phase vs reward fn. "
-                             "Use to diagnose batch_size scaling.")
-
-    # Weights & Biases
-    parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging")
-    parser.add_argument("--wandb-project", type=str, default="fair-rlvr")
-    parser.add_argument("--wandb-run-name", type=str, default=None)
+                        help="Print per-call timing of generation+train phase vs reward fn")
 
     args = parser.parse_args()
 
-    # Load config file if provided
     config_overrides = {}
     if args.config:
         config_overrides = load_config(args.config)
         print(f"Loaded config from {args.config}")
 
-<<<<<<< HEAD
-    # CLI args override config file
-    train_kwargs = {
-        "model_name": config_overrides.get("model_name", args.model),
-        "n_train": config_overrides.get("n_train", args.n_train),
-        "n_eval": config_overrides.get("n_eval", args.n_eval),
-        "lambda_fair": config_overrides.get("lambda_fair", args.lambda_fair),
-        "alpha_consistency": config_overrides.get("alpha_consistency", args.alpha_consistency),
-        "learning_rate": config_overrides.get("learning_rate", args.lr),
-        "num_train_steps": config_overrides.get("num_train_steps", args.steps),
-        "group_size": config_overrides.get("group_size", args.group_size),
-        "batch_size": config_overrides.get("batch_size", args.batch_size),
-        "gradient_accumulation": config_overrides.get("gradient_accumulation", args.grad_accum),
-        "lora_r": config_overrides.get("lora_r", args.lora_r),
-        "lora_alpha": config_overrides.get("lora_alpha", args.lora_alpha),
-        "kl_coeff": config_overrides.get("kl_coeff", args.kl_coeff),
-=======
     def _resolve(cli_val, config_key, default_val):
         """Precedence: explicit CLI arg > config file value > hardcoded default."""
         if cli_val is not None:
@@ -917,7 +650,6 @@ if __name__ == "__main__":
             return config_overrides[config_key]
         return default_val
 
-    # CLI args take precedence over config file, which takes precedence over defaults
     train_kwargs = {
         "model_name": _resolve(args.model, "model_name", "Qwen/Qwen2.5-3B-Instruct"),
         "train_ratio": _resolve(args.train_ratio, "train_ratio", 0.9),
@@ -928,13 +660,12 @@ if __name__ == "__main__":
         "group_size": _resolve(args.group_size, "group_size", 2),
         "batch_size": _resolve(args.batch_size, "batch_size", 8),
         "gradient_accumulation": _resolve(args.grad_accum, "gradient_accumulation", 2),
-        "max_new_tokens": _resolve(args.max_new_tokens, "max_new_tokens", 256),
+        "max_new_tokens": _resolve(args.max_new_tokens, "max_new_tokens", 512),
         "lora_r": _resolve(args.lora_r, "lora_r", 16),
         "lora_alpha": _resolve(args.lora_alpha, "lora_alpha", 32),
         "kl_coeff": _resolve(args.kl_coeff, "kl_coeff", 0.01),
         "lr_scheduler_type": _resolve(args.lr_scheduler, "lr_scheduler_type", "cosine"),
         "warmup_ratio": _resolve(args.warmup_ratio, "warmup_ratio", 0.05),
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         "use_4bit": not args.no_4bit,
         "gradient_checkpointing": not args.no_grad_checkpoint,
         "output_dir": _resolve(args.output_dir, "output_dir", "results/fair_rlvr"),
@@ -944,13 +675,7 @@ if __name__ == "__main__":
         "wandb_project": _resolve(args.wandb_project, "wandb_project", "fair-rlvr"),
         "wandb_run_name": _resolve(args.wandb_run, "wandb_run_name", None),
         "dry_run": args.dry_run,
-<<<<<<< HEAD
-        "use_wandb": args.wandb,
-        "wandb_project": args.wandb_project,
-        "wandb_run_name": args.wandb_run_name,
-=======
         "profile": args.profile,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     }
 
     train(**train_kwargs)

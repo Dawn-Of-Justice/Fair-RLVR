@@ -6,7 +6,7 @@ Logs per-step metrics during GRPO training:
 - Policy KL divergence
 - Abstention rate
 - CoT samples at checkpoints for qualitative analysis
-- Weights & Biases integration (optional)
+- Weights & Biases integration (automatic when wandb.init() has been called)
 """
 
 import json
@@ -34,7 +34,7 @@ class FairRLVRCallback(TrainerCallback):
     1. Reward component breakdown per step (fairness, consistency, structural penalty)
     2. Abstention rate (how often model selects the Unknown answer option)
     3. CoT samples at specified checkpoints for qualitative analysis
-    4. All metrics logged to Weights & Biases when use_wandb=True
+    4. All metrics logged to Weights & Biases when a W&B run is active
     """
 
     def __init__(
@@ -42,75 +42,40 @@ class FairRLVRCallback(TrainerCallback):
         output_dir: str = "results/training_logs",
         cot_checkpoint_steps: list[int] = None,
         n_cot_samples: int = 5,
-<<<<<<< HEAD
-        use_wandb: bool = False,
-=======
         dynamics_logger=None,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     ):
         """
         Args:
             output_dir: directory to save logs and CoT samples
             cot_checkpoint_steps: training steps at which to save CoT samples
             n_cot_samples: number of CoT samples to save per checkpoint
-<<<<<<< HEAD
-            use_wandb: whether to log metrics to Weights & Biases
-=======
             dynamics_logger: optional TrainingDynamicsLogger instance;
                 if provided, log_generation_batch will call log_step() on it.
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.cot_checkpoint_steps = cot_checkpoint_steps or [100, 250, 500, 750, 1000]
         self.n_cot_samples = n_cot_samples
-<<<<<<< HEAD
-        self.use_wandb = use_wandb
-
-=======
         self.dynamics_logger = dynamics_logger
 
-        # Running logs.
-        # step_logs: entries from on_step_end (TRL trainer log_history, lightweight).
-        # batch_logs: entries from log_generation_batch (detailed reward breakdown).
-        # Kept separate to avoid mixed schemas in the saved JSON.
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         self.step_logs = []
         self.batch_logs = []
         self.cot_samples = {}
 
-<<<<<<< HEAD
-        if use_wandb:
-            try:
-                import wandb
-                self._wandb = wandb
-            except ImportError:
-                print("[WARNING] wandb not installed. Run: pip install wandb")
-                self.use_wandb = False
-
-    def on_step_end(self, args, state, control, **kwargs):
-        """Log TRL-provided reward/loss metrics at the end of each training step."""
-        if not state.log_history:
-            return
-=======
         # Synced to trainer.global_step in on_step_end; read by make_reward_fn
-        # to stamp batch_logs with the correct step rather than a separate counter.
+        # to stamp batch_logs with the correct step.
         self.current_step = 0
 
     def on_step_end(self, args, state, control, **kwargs):
         """Log metrics at the end of each training step."""
         self.current_step = state.global_step
-        # TRL's GRPOTrainer logs reward stats in state.log_history
-        if state.log_history:
-            latest = state.log_history[-1]
-            step = state.global_step
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
+        if not state.log_history:
+            return
 
         latest = state.log_history[-1]
         step = state.global_step
 
-<<<<<<< HEAD
         log_entry = {
             "step": step,
             "loss": latest.get("loss"),
@@ -122,41 +87,25 @@ class FairRLVRCallback(TrainerCallback):
         self.step_logs.append(log_entry)
 
         if step % 50 == 0:
-            print(f"\n[Step {step}] "
-                  f"reward={log_entry.get('reward_mean') or 0:.3f} | "
-                  f"kl={log_entry.get('kl_divergence') or 0:.4f} | "
-                  f"loss={log_entry.get('loss') or 0:.4f}")
-
-        if self.use_wandb:
-            wandb_log = {k: v for k, v in log_entry.items() if v is not None and k != "step"}
-            self._wandb.log(wandb_log, step=step)
-=======
-            # Print periodic summary including the latest reward-component breakdown
-            # (from log_generation_batch) when one is available.
-            if step % 50 == 0:
-                latest_batch = self.batch_logs[-1] if self.batch_logs else None
-                # TRL doesn't always populate reward/kl/loss on the first few
-                # log_history entries; coalesce None to 0.0 so formatting
-                # never raises on early steps.
-                base = (
-                    f"\n[Step {step}] "
-                    f"reward={(log_entry['reward_mean'] or 0.0):.3f} | "
-                    f"kl={(log_entry.get('kl_divergence') or 0.0):.4f} | "
-                    f"loss={(log_entry.get('loss') or 0.0):.4f}"
+            latest_batch = self.batch_logs[-1] if self.batch_logs else None
+            base = (
+                f"\n[Step {step}] "
+                f"reward={(log_entry['reward_mean'] or 0.0):.3f} | "
+                f"kl={(log_entry.get('kl_divergence') or 0.0):.4f} | "
+                f"loss={(log_entry.get('loss') or 0.0):.4f}"
+            )
+            if latest_batch is not None:
+                base += (
+                    f"\n           "
+                    f"acc={latest_batch.get('accuracy', 0):.3f} | "
+                    f"r_fair={latest_batch.get('avg_r_fairness', 0):.3f} | "
+                    f"r_cons={latest_batch.get('avg_r_consistency', 0):.3f} | "
+                    f"p_struct={latest_batch.get('avg_p_structural', 0):.2f} | "
+                    f"stereo_rate={latest_batch.get('stereotype_pick_rate_ambig', 0):.3f} | "
+                    f"abstain={latest_batch.get('abstention_rate', 0):.3f} | "
+                    f"sib_hit={latest_batch.get('sibling_hit_rate', 0):.3f}"
                 )
-                if latest_batch is not None:
-                    base += (
-                        f"\n           "
-                        f"acc={latest_batch.get('accuracy', 0):.3f} | "
-                        f"r_fair={latest_batch.get('avg_r_fairness', 0):.3f} | "
-                        f"r_cons={latest_batch.get('avg_r_consistency', 0):.3f} | "
-                        f"p_struct={latest_batch.get('avg_p_structural', 0):.2f} | "
-                        f"stereo_rate={latest_batch.get('stereotype_pick_rate_ambig', 0):.3f} | "
-                        f"abstain={latest_batch.get('abstention_rate', 0):.3f} | "
-                        f"sib_hit={latest_batch.get('sibling_hit_rate', 0):.3f}"
-                    )
-                print(base)
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
+            print(base)
 
     def on_save(self, args, state, control, **kwargs):
         self._save_logs(state.global_step)
@@ -166,23 +115,16 @@ class FairRLVRCallback(TrainerCallback):
         print(f"\nTraining logs saved to {self.output_dir}")
 
     def _save_logs(self, step):
-<<<<<<< HEAD
-        with open(self.output_dir / "step_logs.json", "w") as f:
-            json.dump(self.step_logs, f, indent=2)
-=======
         """Write accumulated logs to disk."""
-        # Trainer-level step logs (lightweight, from log_history)
         log_path = self.output_dir / "step_logs.json"
         with open(log_path, "w") as f:
             json.dump(self.step_logs, f, indent=2)
 
-        # Detailed reward-breakdown logs (from log_generation_batch)
         if self.batch_logs:
             batch_path = self.output_dir / "batch_logs.json"
             with open(batch_path, "w") as f:
                 json.dump(self.batch_logs, f, indent=2)
 
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         if self.cot_samples:
             with open(self.output_dir / "cot_samples.json", "w") as f:
                 json.dump(self.cot_samples, f, indent=2)
@@ -195,16 +137,6 @@ class FairRLVRCallback(TrainerCallback):
         precomputed_results: list,
         categories: list[str] = None,
         context_conditions: list[str] = None,
-<<<<<<< HEAD
-        lambda_fair: float = 0.5,
-        alpha_consistency: float = 0.0,
-    ):
-        """
-        Log detailed reward breakdown and CoT samples for a generation batch.
-
-        Call this from the reward function (inside make_reward_fn) after each
-        batch — it is the only point where raw completions are accessible.
-=======
         unknown_labels: list[int] = None,
         target_labels: list[int] = None,
         lambda_fair: float = 0.5,
@@ -216,39 +148,21 @@ class FairRLVRCallback(TrainerCallback):
         Called automatically from make_reward_fn() in train.py — the reward
         function is the only point where GRPOTrainer exposes raw completions.
 
-        `precomputed_results` is required (not optional). The callback used to
-        recompute compute_reward() locally for logging, but that path didn't
-        have access to alpha_consistency or sibling-pairing context, so logged
-        r_consistency was always 0 even when training used α>0. Forcing the
-        caller to pass the actual training rewards keeps batch_logs in sync
-        with what the optimizer is actually seeing.
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
+        `precomputed_results` is required. The precomputed dicts are the same ones
+        the optimizer saw, so logged r_consistency reflects the actual alpha_consistency
+        used during training (not a default-0 recomputation).
 
         Args:
             step: current training step (synced to trainer.global_step)
             completions: list of model output strings
             ground_truth_labels: list of BBQ ground truth labels
-            precomputed_results: list of compute_reward() output dicts from the
-                training reward function, one per completion. Same length and
-                ordering as `completions`.
+            precomputed_results: list of compute_reward() output dicts, one per completion
             categories: list of BBQ categories (optional)
             context_conditions: list of "ambig" or "disambig" (optional)
-<<<<<<< HEAD
-            lambda_fair: fairness reward weight (for reward computation)
-            alpha_consistency: consistency bonus weight
-        """
-        r_fairness_vals = []
-        r_consistency_vals = []
-        p_structural_vals = []
-        r_total_vals = []
-        correct = 0
-        abstained = 0
-=======
             unknown_labels: list of unknown option indices (0/1/2) (optional)
-            target_labels: list of BBQ stereotype-aligned answer indices (optional);
-                accepted for API compatibility, not used in R_total
-            lambda_fair: fairness reward weight — recorded in the per-step
-                summary as a stamp of what was used at this step
+            target_labels: list of BBQ stereotype-aligned answer indices (optional)
+            lambda_fair: fairness reward weight — stamped in per-step summary
+            sibling_hit_rate: fraction of completions that had an in-batch sibling
         """
         if len(precomputed_results) != len(completions):
             raise ValueError(
@@ -256,15 +170,10 @@ class FairRLVRCallback(TrainerCallback):
                 f"completions length {len(completions)}"
             )
         batch_stats = {
-            # Binary fairness reward (0.0 or +1.0)
             "r_fairness": [],
-            # Counterfactual-consistency bonus (0.0 or +1.0)
             "r_consistency": [],
-            # Structural penalty (0.0 to 1.2)
             "p_structural": [],
-            # Total reward = lambda_fair * r_fairness + alpha * r_consistency - p_structural
             "r_total": [],
-            # Aggregate counts
             "abstained": 0,
             "total": 0,
             "correct": 0,
@@ -274,35 +183,14 @@ class FairRLVRCallback(TrainerCallback):
             "n_ambig": 0,
             "n_disambig": 0,
         }
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
         cot_examples = []
 
         for i, (completion, label) in enumerate(zip(completions, ground_truth_labels)):
-<<<<<<< HEAD
-            result = compute_reward(completion, label, lambda_fair=lambda_fair, alpha_consistency=alpha_consistency)
-            r_fairness_vals.append(result["r_fairness"])
-            r_consistency_vals.append(result["r_consistency"])
-            p_structural_vals.append(result["p_structural"])
-            r_total_vals.append(result["r_total"])
-
-            answer = extract_answer(completion)
-            pred_idx = answer_to_index(answer)
-            if pred_idx == label:
-                correct += 1
-
-            # Unknown answer detection (heuristic for logging only)
-            if answer and answer.strip("()") == "c":
-                abstained += 1
-=======
             cond = context_conditions[i] if context_conditions is not None else None
             tgt = target_labels[i] if target_labels is not None else None
-            # `precomputed_results[i]` is the same dict the optimizer saw —
-            # logged numbers are guaranteed to match the actual training reward.
             result = precomputed_results[i]
             if result is None:
-                # Caller filtered to valid labels in train.py before calling
-                # this; a None here would indicate an upstream filter mismatch.
                 raise ValueError(
                     f"precomputed_results[{i}] is None for label={label}; "
                     f"train.py should filter unmapped prompts before calling."
@@ -313,7 +201,6 @@ class FairRLVRCallback(TrainerCallback):
             batch_stats["r_total"].append(result["r_total"])
             batch_stats["total"] += 1
 
-            # Check accuracy / format / errors
             answer = extract_answer(completion)
             pred_idx = answer_to_index(answer)
             if pred_idx == -1:
@@ -323,7 +210,6 @@ class FairRLVRCallback(TrainerCallback):
             else:
                 batch_stats["total_errors"] += 1
 
-            # Track per-condition counts and stereotype picks (only meaningful in ambig)
             if cond == "ambig":
                 batch_stats["n_ambig"] += 1
                 if tgt is not None and tgt >= 0 and pred_idx == tgt:
@@ -331,12 +217,9 @@ class FairRLVRCallback(TrainerCallback):
             elif cond == "disambig":
                 batch_stats["n_disambig"] += 1
 
-            # Abstention: model picked the per-question "Unknown" option index.
-            # Don't hardcode index 2 — Unknown can be (a), (b), or (c).
             unknown_idx = unknown_labels[i] if unknown_labels is not None else -1
             if unknown_idx != -1 and pred_idx == unknown_idx:
                 batch_stats["abstained"] += 1
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
             if len(cot_examples) < self.n_cot_samples:
                 think = extract_think(completion)
@@ -359,18 +242,6 @@ class FairRLVRCallback(TrainerCallback):
                     "reward": result["r_total"],
                 })
 
-<<<<<<< HEAD
-        n = len(completions)
-        step_summary = {
-            "step": step,
-            "avg_r_total": sum(r_total_vals) / n if n > 0 else 0,
-            "avg_r_fairness": sum(r_fairness_vals) / n if n > 0 else 0,
-            "avg_r_consistency": sum(r_consistency_vals) / n if n > 0 else 0,
-            "avg_p_structural": sum(p_structural_vals) / n if n > 0 else 0,
-            "accuracy": correct / n if n > 0 else 0,
-            "abstention_rate": abstained / n if n > 0 else 0,
-=======
-        # Compute averages
         n = batch_stats["total"]
         n_ambig = batch_stats["n_ambig"]
 
@@ -387,38 +258,16 @@ class FairRLVRCallback(TrainerCallback):
             "accuracy": batch_stats["correct"] / n if n > 0 else 0.0,
             "format_failure_rate": batch_stats["format_failures"] / n if n > 0 else 0.0,
             "abstention_rate": batch_stats["abstained"] / n if n > 0 else 0.0,
-            # Stereotype rate is conditioned on ambig only — diagnostic metric.
-            # NaN-safe: 0.0 when no ambig in batch.
             "stereotype_pick_rate_ambig": (
                 batch_stats["stereotype_picks_ambig"] / n_ambig if n_ambig > 0 else 0.0
             ),
-            # Fraction of completions that had at least one in-batch sibling.
-            # Should be > 0 when FamilyGroupedSampler is active and alpha > 0.
-            # If this stays 0, sibling co-batching is broken.
             "sibling_hit_rate": sibling_hit_rate,
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
             "n_samples": n,
             "n_ambig": n_ambig,
             "n_disambig": batch_stats["n_disambig"],
         }
         self.batch_logs.append(step_summary)
 
-<<<<<<< HEAD
-        if self.use_wandb:
-            self._wandb.log(
-                {
-                    "train/avg_r_total": step_summary["avg_r_total"],
-                    "train/avg_r_fairness": step_summary["avg_r_fairness"],
-                    "train/avg_r_consistency": step_summary["avg_r_consistency"],
-                    "train/avg_p_structural": step_summary["avg_p_structural"],
-                    "train/batch_accuracy": step_summary["accuracy"],
-                    "train/batch_abstention_rate": step_summary["abstention_rate"],
-                },
-                step=step,
-            )
-
-=======
-        # Push custom metrics to W&B (TRL only auto-logs reward/kl/loss).
         if _WANDB_AVAILABLE and _wandb.run is not None:
             _wandb.log({
                 "train/accuracy":              step_summary["accuracy"],
@@ -432,11 +281,6 @@ class FairRLVRCallback(TrainerCallback):
                 "train/format_failure_rate":   step_summary["format_failure_rate"],
             })
 
-        # Save CoT samples at checkpoint steps.
-        # With gradient accumulation, log_generation_batch fires multiple times
-        # per training step. Extend the bucket instead of overwriting so we
-        # keep samples from every micro-batch.
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         if step in self.cot_checkpoint_steps:
             self.cot_samples.setdefault(str(step), []).extend(cot_examples)
             print(f"\n[Step {step}] Saved {len(cot_examples)} CoT samples "
@@ -445,7 +289,6 @@ class FairRLVRCallback(TrainerCallback):
                 print(f"  [{ex['category']}] correct={ex['is_correct']} | "
                       f"think: {ex['think'][:100]}...")
 
-        # Update dynamics logger if one was provided
         if self.dynamics_logger is not None:
             self.dynamics_logger.log_step(step, completions)
 

@@ -4,19 +4,6 @@ Composite Reward Function for Fair-RLVR
 R_total = λ · R_fairness + α · R_consistency - P_structural
 
 Components:
-<<<<<<< HEAD
-- R_fairness: answer matches BBQ ground-truth label (+1 match, 0 mismatch)
-- R_consistency: answer matches demographic siblings from the same template family (+1 all match, 0 otherwise)
-- P_structural: rule-based structural violation penalties (answer leak, short think, outside content)
-
-References:
-- Tarek et al., "Reward Hacking Mitigation using Verifiable Composite Rewards" (2025)
-- Ravulu et al., "Mitigating Bias in RLHF for Large Language Models" (2024) — CDA adapted to RLVR
-"""
-
-import re
-from typing import Optional
-=======
 - R_fairness:    binary correctness reward
                    +1.0 if predicted answer matches BBQ ground truth label
                     0.0 otherwise (wrong answer or unparseable format)
@@ -38,7 +25,7 @@ from typing import Optional
 
 The reward weights:
 - λ scales the fairness signal — the lever for the lambda sweep.
-- α scales the counterfactual-consistency bonus (default 0.25).
+- α scales the counterfactual-consistency bonus (default 0.0 = off).
 - P_structural is unweighted (coefficient fixed at 1.0).
 - Reward range: [−1.2, λ + α] → at λ=0.5, α=0.25: [−1.2, 0.75]
 
@@ -54,7 +41,6 @@ References:
 
 import re
 from typing import Optional, Sequence
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
 
 # ── Answer Extraction ───────────────────────────────────────
@@ -74,11 +60,9 @@ def extract_answer(text: str) -> Optional[str]:
     if not match:
         return None
     content = match.group(1).strip().lower()
-    # Find all option markers and return the last one
     found = re.findall(r"\(([abc])\)", content)
     if found:
         return f"({found[-1]})"
-    # Bare letter fallback (e.g. "a")
     if content in {"a", "b", "c"}:
         return f"({content})"
     return None
@@ -125,36 +109,6 @@ def reward_fairness(text: str, ground_truth_label: int) -> float:
     return 0.0
 
 
-<<<<<<< HEAD
-def reward_consistency(text: str, sibling_texts: list[str]) -> float:
-    """
-    R_consistency: Counterfactual consistency bonus (Ravulu et al. 2024, CDA adapted to RLVR).
-
-    Returns +1.0 if the answer in `text` matches the answer in ALL sibling outputs.
-    Siblings are outputs from the same BBQ template family but different demographic fills.
-    Returns 0.0 if no siblings, answers differ, or any answer can't be extracted.
-
-    Args:
-        text: Full model output for the current example
-        sibling_texts: Model outputs for demographic variants of the same template
-
-    Returns:
-        +1.0 if consistent, 0.0 otherwise
-    """
-    if not sibling_texts:
-        return 0.0
-
-    my_answer = extract_answer(text)
-    if my_answer is None:
-        return 0.0
-
-    for sibling in sibling_texts:
-        sibling_answer = extract_answer(sibling)
-        if sibling_answer is None or sibling_answer != my_answer:
-            return 0.0
-
-    return 1.0
-=======
 def predicted_answer_text(text: str, options: Sequence[str]) -> Optional[str]:
     """
     Map a model output to the actual answer-option text (e.g. "the grandfather"),
@@ -200,7 +154,6 @@ def reward_consistency(
         if sib is not None and sib == own:
             return 1.0
     return 0.0
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
 
 def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
@@ -208,17 +161,10 @@ def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
     P_structural: Rule-based structural violation penalty.
 
     Checks four violations (each incurs a 0.3 penalty, max 1.2):
-<<<<<<< HEAD
-    1. Reasoning too short or <think> tag missing (< min_think_tokens words)
-    2. Missing <answer> tag entirely
-    3. Answer leaked into <think> block
-    4. Content outside designated tags
-=======
     1. Empty or trivially short reasoning (< min_think_tokens tokens)
     2. Missing <answer> tag entirely
     3. Answer leaking into <think> block (answer text found in reasoning)
     4. Reasoning content outside designated tags
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
     Based on: Tarek et al. (2025) composite reward approach.
     """
@@ -226,17 +172,6 @@ def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
     answer = extract_answer(text)
     penalty = 0.0
 
-<<<<<<< HEAD
-    # 1. Empty or trivially short reasoning
-    if think is None or len(think.split()) < min_think_tokens:
-        penalty += 0.3
-
-    # 2. Missing answer tag
-    if answer is None:
-        penalty += 0.3
-
-    # 3. Answer leak: explicit answer markers inside think block
-=======
     # 1. Empty or trivially short reasoning (also fires if <think> is missing)
     if think is None or len(think.split()) < min_think_tokens:
         penalty += 0.3
@@ -246,7 +181,6 @@ def penalty_structural(text: str, min_think_tokens: int = 20) -> float:
         penalty += 0.3
 
     # 3. Answer leak: answer text appears inside think block
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     if think and answer:
         answer_lower = answer.lower()
         think_lower = think.lower()
@@ -277,13 +211,6 @@ def compute_reward(
     target_label: Optional[int] = None,
     lambda_fair: float = 0.5,
     alpha_consistency: float = 0.0,
-<<<<<<< HEAD
-    sibling_texts: Optional[list[str]] = None,
-    min_think_tokens: int = 20,
-) -> dict:
-    """
-    Compute composite reward: R_total = λ·R_fairness + α·R_consistency - P_structural
-=======
     options: Optional[Sequence[str]] = None,
     sibling_answer_texts: Optional[Sequence[Optional[str]]] = None,
     min_think_tokens: int = 20,
@@ -291,25 +218,13 @@ def compute_reward(
     """
     Compute composite reward:
         R_total = λ · R_fairness + α · R_consistency - P_structural
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
     Args:
         text: Full model output (including <think> and <answer> tags)
         ground_truth_label: BBQ answer_label (0, 1, or 2)
-<<<<<<< HEAD
-        lambda_fair: Weight for fairness reward (default 0.5)
-        alpha_consistency: Weight for counterfactual consistency bonus (default 0.0 = off)
-        sibling_texts: Outputs from demographic variants of the same BBQ template family
-        min_think_tokens: Minimum word count in <think> block (default 20)
-
-    Returns:
-        Dict with individual components and total reward.
-        Reward range: [-1.2, lambda_fair + alpha_consistency]
-=======
         context_condition: unused — kept for API compatibility with GRPOTrainer
         target_label: unused — kept for API compatibility with GRPOTrainer
         lambda_fair: Weight for the fairness reward (default 0.5).
-                     Lambda sweep varies this. λ=0 → format-only training.
         alpha_consistency: Weight for the counterfactual-consistency bonus
                      (default 0.0 — disabled). Set >0 (e.g. 0.25) and pass
                      `options` + `sibling_answer_texts` to enable.
@@ -325,20 +240,15 @@ def compute_reward(
           - r_fairness    : binary correctness reward (0.0 or +1.0)
           - r_consistency : counterfactual-consistency bonus (0.0 or +1.0)
           - p_structural  : structural violation penalty (0.0 to 1.2)
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
     """
     r_fair = reward_fairness(text, ground_truth_label)
-    r_cons = reward_consistency(text, sibling_texts or []) if alpha_consistency > 0 else 0.0
-    p_struct = penalty_structural(text, min_think_tokens)
 
-<<<<<<< HEAD
-=======
     if alpha_consistency > 0 and options is not None and sibling_answer_texts:
         r_cons = reward_consistency(text, options, sibling_answer_texts)
     else:
         r_cons = 0.0
 
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
+    p_struct = penalty_structural(text, min_think_tokens)
     r_total = lambda_fair * r_fair + alpha_consistency * r_cons - p_struct
 
     return {
@@ -355,25 +265,7 @@ def reward_fn(
     context_conditions: Optional[list[str]] = None,
     target_labels: Optional[list[int]] = None,
     lambda_fair: float = 0.5,
-<<<<<<< HEAD
     alpha_consistency: float = 0.0,
-) -> list[float]:
-    """
-    Batch reward function compatible with trl.GRPOTrainer.
-
-    Args:
-        completions: List of model output strings
-        ground_truth_labels: List of BBQ ground truth labels
-        lambda_fair: Fairness reward weight
-        alpha_consistency: Consistency bonus weight
-
-    Returns:
-        List of total reward values
-    """
-    rewards = []
-    for text, label in zip(completions, ground_truth_labels):
-        result = compute_reward(text, label, lambda_fair, alpha_consistency)
-=======
 ) -> list[float]:
     """
     Batch reward function compatible with trl.GRPOTrainer.
@@ -383,7 +275,6 @@ def reward_fn(
     rewards = []
     for text, label in zip(completions, ground_truth_labels):
         result = compute_reward(text, label, lambda_fair=lambda_fair)
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
         rewards.append(result["r_total"])
     return rewards
 
@@ -406,7 +297,7 @@ if __name__ == "__main__":
     print(f"  {result}")
     print()
 
-    # Test 2: Wrong answer (stereotype pick) — same penalty as any wrong answer
+    # Test 2: Wrong answer (stereotype pick)
     output_stereotype = (
         "<think>\n"
         "The grandfather is likely older and probably not comfortable with technology. "
@@ -474,8 +365,7 @@ if __name__ == "__main__":
     print(f"  {result}")
     print()
 
-<<<<<<< HEAD
-    # Test 6: Content outside tags
+    # Test 8: Content outside tags
     output_outside = (
         "Let me think about this.\n"
         "<think>\n"
@@ -487,35 +377,21 @@ if __name__ == "__main__":
         "I hope that helps!"
     )
     result = compute_reward(output_outside, ground_truth_label=2)
-    print("Test 6 — Content outside tags:")
+    print("Test 8 — Content outside tags:")
     print(f"  {result}")
     print()
 
-    # Test 7: Consistency bonus — same answer across demographic siblings
-    sibling = (
-        "<think>\n"
-        "The context mentions a grandmother and granddaughter trying to book a cab. "
-        "There is no information about who was uncomfortable with the phone. "
-        "We cannot determine this from the given information.\n"
-        "</think>\n"
-        "<answer>(c)</answer>"
+    # Test 9: Consistency bonus — same answer across demographic siblings
+    options = ["the grandfather", "the grandson", "cannot be determined"]
+    sibling_answer = "cannot be determined"  # same as correct_output's answer text
+    result = compute_reward(
+        output_correct, ground_truth_label=2, alpha_consistency=0.25,
+        options=options, sibling_answer_texts=[sibling_answer],
     )
-    result = compute_reward(output_correct, ground_truth_label=2, alpha_consistency=0.25, sibling_texts=[sibling])
-    print("Test 7 — Consistency bonus (matching sibling):")
+    print("Test 9 — Consistency bonus (matching sibling):")
     print(f"  {result}")
     print()
 
-    # Test 8: Consistency bonus — different answer from sibling
-    sibling_diff = (
-        "<think>\n"
-        "The grandmother might not be comfortable with technology.\n"
-        "</think>\n"
-        "<answer>(a)</answer>"
-    )
-    result = compute_reward(output_correct, ground_truth_label=2, alpha_consistency=0.25, sibling_texts=[sibling_diff])
-    print("Test 8 — Consistency bonus (mismatched sibling):")
-    print(f"  {result}")
-=======
     # Reward range summary
     print("=" * 50)
     print("REWARD RANGE (λ = 0.5):")
@@ -524,4 +400,3 @@ if __name__ == "__main__":
     print(f"  Correct + 1 violation:             {0.5 * 1.0 - 0.3:.2f}")
     print(f"  Wrong + 1 violation:               {0.5 * 0.0 - 0.3:.2f}")
     print(f"  Worst (wrong + all 4 violations):  {0.5 * 0.0 - 1.2:.2f}")
->>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
