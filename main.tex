@@ -128,7 +128,7 @@ A separate semantic leakage penalty based on Sentence-BERT cosine similarity bet
 
 \subsection{Training with GRPO}
 
-We use Group Relative Policy Optimization (GRPO) \cite{deepseekmath} for training. For each input prompt, $G = 2$ candidate outputs are sampled. The reward $R_i$ is computed for each output, and advantages are normalized within the group:
+We use Group Relative Policy Optimization (GRPO) \cite{deepseekmath} for training. For each input prompt, $G = 4$ candidate outputs are sampled. The reward $R_i$ is computed for each output, and advantages are normalized within the group:
 
 \begin{equation}
 A_i = \frac{R_i - \mu(R)}{\sigma(R)}
@@ -147,13 +147,13 @@ A_i = \frac{R_i - \mu(R)}{\sigma(R)}
 \textbf{Component} & \textbf{Specification} \\
 \midrule
 Base Model & Qwen2.5-3B-Instruct \\
-Quantization & 4-bit (bitsandbytes) \\
+Quantization & None (bf16) \\
 Adaptation & LoRA ($r=16$, $\alpha=32$) \\
 Hardware & 1$\times$ NVIDIA H100 (80 GB) \\
 Learning Rate & $1 \times 10^{-5}$ \\
-Group Size ($G$) & 2 \\
-Batch Size & 8 (gradient accumulation: 2) \\
-Max New Tokens & 512 \\
+Group Size ($G$) & 4 \\
+Batch Size & 8 (gradient accumulation: 2, effective: 16) \\
+Max New Tokens & 256 \\
 KL Coefficient & 0.01 \\
 Training Samples & 52,643 \\
 Training Steps & $\sim$3,500 \\

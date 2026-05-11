@@ -1,5 +1,5 @@
 # Experiment 2: Lambda ablation sweep
-# Target hardware: Lightning.ai single H100 80GB (85 GB VRAM)
+# Target hardware: Lightning.ai single H100 80GB
 # Run separately for each lambda value:
 #   python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.1 --output-dir results/lambda_0.1
 #   python -m src.train --config configs/lambda_sweep.yaml --lambda-fair 0.3 --output-dir results/lambda_0.3
@@ -14,24 +14,21 @@ train_ratio: 0.9
 
 # Reward — lambda overridden via CLI; alpha=0 keeps this a pure lambda sweep
 lambda_fair: 0.5
-# Lambda sweep keeps the consistency bonus OFF so the only varying reward
-# component is λ. Set --alpha-consistency on the CLI for combined runs.
 alpha_consistency: 0.0
 
-# Training — identical to main experiment for fair comparison (H100 settings)
+# Training — identical to main experiment for fair comparison
 learning_rate: 1.0e-5
 lr_scheduler_type: "cosine"
 warmup_ratio: 0.05
 num_train_steps: 3500
 group_size: 4
-batch_size: 32
-gradient_accumulation: 1
-max_new_tokens: 512
+batch_size: 8
+gradient_accumulation: 2
+max_new_tokens: 256
 kl_coeff: 0.01
 
-# Quantization — disabled on H100
 use_4bit: false
-gradient_checkpointing: false
+gradient_checkpointing: true
 
 # DAPO asymmetric clipping
 clip_ratio_low: 0.20

@@ -11,19 +11,19 @@ train_ratio: 0.9
 lambda_fair: 0.0
 alpha_consistency: 0.0
 
-# Training — identical to main experiment (H100 settings)
+# Training — identical to main experiment (H100 80GB settings)
 learning_rate: 1.0e-5
 num_train_steps: 3500
 group_size: 4
-batch_size: 32
-gradient_accumulation: 1
+batch_size: 8
+gradient_accumulation: 2
+max_new_tokens: 256
 kl_coeff: 0.01
 clip_ratio_low: 0.20
 clip_ratio_high: 0.28
 
-# Quantization — disabled on H100
 use_4bit: false
-gradient_checkpointing: false
+gradient_checkpointing: true
 
 # LoRA
 lora_r: 16

@@ -1,32 +1,36 @@
 # Fair-RLVR: Main experiment config
-# Target hardware: Lightning.ai single H100 80GB (85 GB VRAM)
+# Target hardware: Lightning.ai single H100 80GB
 # Usage: python -m src.train --config configs/fair_rlvr.yaml
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
-# Data — full 90/10 split of BBQ (52,643 train / 5,849 eval)
+# Data — full 90/10 split of BBQ
 train_ratio: 0.9
 
 # Reward: R_total = lambda_fair * R_fairness + alpha_consistency * R_consistency - P_structural
 lambda_fair: 0.5
-# Counterfactual-consistency bonus (Ravulu et al. 2024 CDA, RLVR-adapted).
-# 0.0 disables; 0.25 is the recommended on value.
-alpha_consistency: 0.0  # set to 0.25 to enable
+alpha_consistency: 0.0  # set to 0.25 to enable counterfactual-consistency bonus
 
-# Training — tuned for H100 85 GB (Qwen2.5-3B in bf16 ≈ 6 GB; no quantization needed)
+# Training
+# Memory budget (H100 80GB, Qwen2.5-3B bf16):
+#   model ≈ 6 GB  |  reference model ≈ 6 GB  |  optimizer (LoRA only) ≈ 1 GB
+#   forward pass activations (grad-checkpoint): batch*G = 8*4 = 32 seqs × 256 tok ≈ 2 GB
+#   generation KV cache: 32 seqs × 256 tok ≈ 0.7 GB
+#   total ≈ ~16 GB — leaves ample headroom
 learning_rate: 1.0e-5
 lr_scheduler_type: "cosine"
 warmup_ratio: 0.05
 num_train_steps: 3500
-group_size: 4        # G=4 gives better advantage estimates than G=2; raise to 8 if entropy collapses
-batch_size: 32       # micro-batch; fits comfortably on H100 with bf16 + LoRA
-gradient_accumulation: 1
-max_new_tokens: 512
+group_size: 4
+batch_size: 8
+gradient_accumulation: 2   # effective batch = 16 prompts → 64 completions per step
+max_new_tokens: 256        # BBQ reasoning fits in ~100 tokens; 256 gives headroom
 kl_coeff: 0.01
 
-# Quantization — disabled: H100 has enough VRAM for Qwen2.5-3B in bf16
+# Quantization — disabled: H100 can hold Qwen2.5-3B in bf16
 use_4bit: false
-gradient_checkpointing: false   # not needed on H100; disabling speeds up training ~30%
+# Gradient checkpointing: recomputes activations during backward; mandatory at these batch sizes
+gradient_checkpointing: true
 
 # DAPO asymmetric clipping (arXiv:2503.14476)
 clip_ratio_low: 0.20
