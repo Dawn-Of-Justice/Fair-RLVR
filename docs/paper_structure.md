@@ -14,9 +14,11 @@ type: project
 ## Abstract (~150 words)
 - Problem: RLHF is fragile — noisy human labels, vibe-based alignment
 - Insight: Fairness has verifiable ground truth (BBQ benchmark)
-- Method: GRPO with composite reward R_total = R_correctness + λ·R_fairness - β·R_hacking
+- Method: GRPO with composite reward `R_total = λ·R_fairness + α·R_consistency - P_structural`
 - Result: X% bias reduction, no alignment tax on MMLU/GSM8K
 - Contribution: first text-only RLVR approach using fairness as verifiable reward
+
+> ⚠️ Reward equation in abstract must be updated: old equation was `R_correctness + λ·R_fairness - β·R_hacking`. Current correct equation is `λ·R_fairness + α·R_consistency - P_structural` (R_consistency added per Ravulu et al. 2024 CDA, RLVR-adapted; off at α=0 in the lambda sweep, on at α=0.25 in the main `fair_rlvr.yaml` run).
 
 One-liner pitch:
 "While DeepSeek-R1 proved that reasoning emerges from correctness rewards in objective tasks, we demonstrate that fairness itself is a verifiable ground truth — and that models can spontaneously develop de-biasing logic within their chain-of-thought."

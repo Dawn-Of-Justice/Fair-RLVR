@@ -1,8 +1,11 @@
 # Dry run config — test the full pipeline with minimal compute
 # Usage: python -m src.train --config configs/dry_run.yaml --dry-run
+# NOTE: --dry-run flag overrides train_ratio to 0.01 (~584 samples) and steps to 5.
+#       The values below are only active without --dry-run.
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
+<<<<<<< HEAD
 # Data — minimal (overridden by --dry-run flag in train.py)
 n_train: 20
 n_eval: 10
@@ -10,18 +13,29 @@ n_eval: 10
 # Reward
 lambda_fair: 0.5
 alpha_consistency: 0.0
+=======
+# Data
+train_ratio: 0.9
 
-# Training — minimal
+# Reward
+lambda_fair: 0.5
+>>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
+
+# Training — minimal for smoke-testing
 learning_rate: 1.0e-5
 num_train_steps: 5
 group_size: 2
+<<<<<<< HEAD
 batch_size: 4
+=======
+batch_size: 2
+>>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 gradient_accumulation: 1
 kl_coeff: 0.01
 clip_ratio_low: 0.20
 clip_ratio_high: 0.28
 
-# LoRA
+# LoRA — smaller rank for speed
 lora_r: 8
 lora_alpha: 16
 

@@ -50,20 +50,22 @@ def categorize_prediction(pred):
     ]
     has_logic = sum(1 for p in logic_phrases if p in think_lower) >= 2
 
-    category = "other"
+    pattern = "other"
     if is_correct and is_ambig and has_evidence_reasoning:
-        category = "emergent_debiasing"
+        pattern = "emergent_debiasing"
     elif is_correct and is_ambig and has_stereotype_catch:
-        category = "stereotype_catching"
+        pattern = "stereotype_catching"
     elif is_correct and not is_ambig and has_logic:
-        category = "evidence_following"
+        pattern = "evidence_following"
     elif not is_correct and is_ambig:
-        category = "failure_ambig"
+        pattern = "failure_ambig"
     elif not is_correct and not is_ambig:
-        category = "failure_disambig"
+        pattern = "failure_disambig"
 
+    # Use "pattern" rather than "category" so the BBQ category field
+    # (preserved on the prediction dict) is not overwritten on merge.
     return {
-        "category": category,
+        "pattern": pattern,
         "is_correct": is_correct,
         "is_ambig": is_ambig,
         "has_evidence_reasoning": has_evidence_reasoning,
@@ -79,10 +81,10 @@ def extract_best_examples(predictions, n_per_category=3):
 
     for pred in predictions:
         info = categorize_prediction(pred)
-        cat = info["category"]
-        if cat not in categorized:
-            categorized[cat] = []
-        categorized[cat].append({
+        pattern = info["pattern"]
+        if pattern not in categorized:
+            categorized[pattern] = []
+        categorized[pattern].append({
             **pred,
             **info,
         })
@@ -103,9 +105,9 @@ def format_for_paper(examples):
     """Format examples as LaTeX-ready text."""
     lines = []
 
-    for cat, preds in examples.items():
+    for pattern, preds in examples.items():
         lines.append(f"\n{'='*60}")
-        lines.append(f"CATEGORY: {cat.upper().replace('_', ' ')} ({len(preds)} examples)")
+        lines.append(f"PATTERN: {pattern.upper().replace('_', ' ')} ({len(preds)} examples)")
         lines.append(f"{'='*60}")
 
         for i, pred in enumerate(preds):
@@ -138,9 +140,9 @@ if __name__ == "__main__":
 
     examples, counts = extract_best_examples(predictions, args.n_per_category)
 
-    print("\nCategory distribution:")
-    for cat, count in sorted(counts.items(), key=lambda x: -x[1]):
-        print(f"  {cat}: {count}")
+    print("\nPattern distribution:")
+    for pattern, count in sorted(counts.items(), key=lambda x: -x[1]):
+        print(f"  {pattern}: {count}")
 
     output_text = format_for_paper(examples)
     print(output_text)
@@ -157,8 +159,8 @@ if __name__ == "__main__":
     json_output = str(Path(args.output).with_suffix(".json"))
     # Clean up non-serializable fields
     clean_examples = {}
-    for cat, preds in examples.items():
-        clean_examples[cat] = [{
+    for pattern, preds in examples.items():
+        clean_examples[pattern] = [{
             "prompt": p["prompt"],
             "think": extract_think(p["model_output"]) or "",
             "answer": extract_answer(p["model_output"]) or "",

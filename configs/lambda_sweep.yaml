@@ -8,20 +8,36 @@
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
+<<<<<<< HEAD
 # Data — full dataset
 n_train: null
 n_eval: null
+=======
+# Data — full 90/10 split of BBQ (same split as main experiment; seed must match)
+train_ratio: 0.9
+>>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 
 # Reward — lambda overridden via CLI; alpha=0 keeps this a pure lambda sweep
 lambda_fair: 0.5
+<<<<<<< HEAD
+=======
+# Lambda sweep keeps the consistency bonus OFF so the only varying reward
+# component is λ. Set --alpha-consistency on the CLI for combined runs.
+>>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 alpha_consistency: 0.0
 
-# Training
+# Training — identical to main experiment for fair comparison
 learning_rate: 1.0e-5
+<<<<<<< HEAD
+=======
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.05
+>>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 num_train_steps: 3500
 group_size: 2
 batch_size: 8
 gradient_accumulation: 2
+max_new_tokens: 256
 kl_coeff: 0.01
 clip_ratio_low: 0.20
 clip_ratio_high: 0.28
@@ -30,7 +46,11 @@ clip_ratio_high: 0.28
 lora_r: 16
 lora_alpha: 32
 
-# Output — overridden via CLI
+# Output — overridden via CLI per lambda value
 output_dir: "results/lambda_sweep"
 save_steps: 500
 seed: 42
+
+# Logging
+use_wandb: false
+wandb_project: "fair-rlvr-lambda-sweep"

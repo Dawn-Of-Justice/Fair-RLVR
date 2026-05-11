@@ -34,12 +34,15 @@ def build_sft_dataset(split_data, tokenizer) -> Dataset:
     - System: SYSTEM_PROMPT
     - User: BBQ prompt
     - Assistant: "<think>\n[answer explanation]\n</think>\n<answer>(x)</answer>"
+
+    Stores prompt_text and full_text separately so the tokenize step can
+    mask prompt tokens (set labels=-100) and compute loss only on the
+    assistant response.
     """
-    texts = []
+    rows = []
     for example in split_data:
         correct_option = label_to_option(example["answer_label"])
 
-        # Simple reasoning template (no real CoT — just the answer with minimal explanation)
         if example["context_condition"] == "ambig":
             assistant_response = (
                 f"<think>\nThe context does not provide enough information "
@@ -53,39 +56,44 @@ def build_sft_dataset(split_data, tokenizer) -> Dataset:
                 f"<answer>{correct_option}</answer>"
             )
 
-        messages = [
+        prompt_messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": example["prompt"]},
-            {"role": "assistant", "content": assistant_response},
         ]
+        full_messages = prompt_messages + [{"role": "assistant", "content": assistant_response}]
 
-        text = tokenizer.apply_chat_template(messages, tokenize=False)
-        texts.append({"text": text})
+        prompt_text = tokenizer.apply_chat_template(
+            prompt_messages, tokenize=False, add_generation_prompt=True
+        )
+        full_text = tokenizer.apply_chat_template(full_messages, tokenize=False)
+        rows.append({"prompt_text": prompt_text, "full_text": full_text})
 
-    return Dataset.from_list(texts)
+    return Dataset.from_list(rows)
 
 
 def train_sft(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
-    n_train: int = 1000,
-    n_eval: int = 500,
+    train_ratio: float = 0.9,
     epochs: int = 3,
     lr: float = 2e-5,
     batch_size: int = 4,
     gradient_accumulation: int = 4,
+    eval_batch_size: int = 8,
+    gradient_checkpointing: bool = True,
     lora_r: int = 16,
     lora_alpha: int = 32,
     max_seq_length: int = 768,
+    max_new_tokens: int = 256,
     output_dir: str = "results/sft",
     device: str = "auto",
+    seed: int = 42,
 ):
     """
     Train SFT baseline on BBQ.
 
     Args:
         model_name: HuggingFace model name
-        n_train: number of training samples
-        n_eval: number of eval samples
+        train_ratio: fraction of BBQ used for training (default 0.9)
         epochs: training epochs
         lr: learning rate
         batch_size: per-device batch size
@@ -104,44 +112,65 @@ def train_sft(
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # The HF Trainer needs right-padding for SFT loss masking; we'll switch to
+    # left-padding for the post-training generation loop just before eval.
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,   # Match train.py (bfloat16, not float16)
         device_map=device,
         trust_remote_code=True,
+        attn_implementation="sdpa",
     )
 
     # ── LoRA ───────────────────────────────────────────────
+    # Target modules must match train.py exactly so the SFT baseline has the
+    # same number of trainable parameters as Fair-RLVR (fair comparison).
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=0.05,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj"],
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
     # ── Load data ──────────────────────────────────────────
-    print("Loading BBQ dataset...")
-    splits = create_splits(n_train=n_train, n_eval=n_eval)
+    print("Loading BBQ dataset (full 90/10 split)...")
+    splits = create_splits(train_ratio=train_ratio, seed=seed)
 
     train_dataset = build_sft_dataset(splits["train"], tokenizer)
     print(f"Training samples: {len(train_dataset)}")
 
-    # Tokenize
+    # Tokenize: compute loss only on assistant tokens by masking prompt with -100
     def tokenize(example):
-        tokens = tokenizer(
-            example["text"],
+        prompt_ids = tokenizer(
+            example["prompt_text"],
+            truncation=True,
+            max_length=max_seq_length,
+        )["input_ids"]
+        full_tokens = tokenizer(
+            example["full_text"],
             truncation=True,
             max_length=max_seq_length,
             padding="max_length",
         )
-        tokens["labels"] = tokens["input_ids"].copy()
-        return tokens
+        labels = full_tokens["input_ids"].copy()
+        # Mask all prompt tokens — loss is computed only on the assistant response
+        prompt_len = len(prompt_ids)
+        labels[:prompt_len] = [-100] * prompt_len
+        # Also mask padding tokens
+        pad_id = tokenizer.pad_token_id
+        labels = [
+            -100 if (tok == pad_id and i >= prompt_len) else lbl
+            for i, (tok, lbl) in enumerate(zip(full_tokens["input_ids"], labels))
+        ]
+        full_tokens["labels"] = labels
+        return full_tokens
 
-    train_dataset = train_dataset.map(tokenize, remove_columns=["text"])
+    train_dataset = train_dataset.map(tokenize, remove_columns=["prompt_text", "full_text"])
 
     # ── Train ──────────────────────────────────────────────
     training_args = TrainingArguments(
@@ -150,11 +179,22 @@ def train_sft(
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation,
         learning_rate=lr,
-        fp16=True,
+        bf16=True,
+        optim="paged_adamw_8bit",
+        gradient_checkpointing=gradient_checkpointing,
         logging_steps=10,
         save_strategy="epoch",
         report_to="none",
         remove_unused_columns=False,
+        dataloader_num_workers=4,
+        dataloader_pin_memory=True,
+    )
+
+    effective_batch = batch_size * gradient_accumulation
+    print(
+        f"Training: micro-batch={batch_size}, grad-accum={gradient_accumulation}, "
+        f"effective batch={effective_batch}, "
+        f"grad-checkpoint={'on' if gradient_checkpointing else 'off'}"
     )
 
     trainer = Trainer(
@@ -171,49 +211,63 @@ def train_sft(
     tokenizer.save_pretrained(str(output_path / "adapter"))
     print(f"Adapter saved to {output_path / 'adapter'}")
 
-    # ── Evaluate ───────────────────────────────────────────
+    # ── Evaluate (real batched generation) ────────────────
     print("\nRunning evaluation...")
     model.eval()
+    # Switch to left padding for generation; right padding is only correct for
+    # the SFT training loss above.
+    tokenizer.padding_side = "left"
 
-    eval_data = []
-    for i in range(min(n_eval, len(splits["eval_ambiguous"]))):
-        eval_data.append(splits["eval_ambiguous"][i])
-    for i in range(min(n_eval, len(splits["eval_disambiguated"]))):
-        eval_data.append(splits["eval_disambiguated"][i])
+    eval_data = [splits["eval"][i] for i in range(len(splits["eval"]))]
 
-    predictions = []
-    for example in tqdm(eval_data, desc="Evaluating"):
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": example["prompt"]},
-        ]
-        prompt_text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+    prompt_texts = [
+        tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": example["prompt"]},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
         )
-        inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+        for example in eval_data
+    ]
+
+    generated_outputs = []
+    for i in tqdm(range(0, len(eval_data), eval_batch_size), desc="Evaluating"):
+        batch_prompts = prompt_texts[i : i + eval_batch_size]
+        inputs = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(model.device)
 
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=512,
+                max_new_tokens=max_new_tokens,
                 do_sample=False,
-                temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
             )
 
-        generated = tokenizer.decode(
-            outputs[0][inputs["input_ids"].shape[1] :],
-            skip_special_tokens=True,
+        input_len = inputs["input_ids"].shape[1]
+        decoded = tokenizer.batch_decode(
+            outputs[:, input_len:], skip_special_tokens=True
         )
+        generated_outputs.extend(decoded)
 
-        predictions.append({
+    predictions = [
+        {
             "model_output": generated,
             "answer_label": example["answer_label"],
             "context_condition": example["context_condition"],
             "category": example["category"],
             "prompt": example["prompt"],
             "target_label": example.get("target_label"),
-        })
+            "unknown_label": example.get("unknown_label", -1),
+        }
+        for example, generated in zip(eval_data, generated_outputs)
+    ]
 
     results = evaluate_all(
         predictions,
@@ -229,22 +283,35 @@ def train_sft(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train SFT baseline on BBQ")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--n-train", type=int, default=1000)
-    parser.add_argument("--n-eval", type=int, default=500)
+    parser.add_argument("--train-ratio", type=float, default=0.9)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=2e-5)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=4,
+                        help="Per-device training micro-batch size")
+    parser.add_argument("--grad-accum", type=int, default=4,
+                        help="Gradient accumulation steps. Effective batch = batch-size * grad-accum")
+    parser.add_argument("--no-grad-checkpoint", action="store_true",
+                        help="Disable gradient checkpointing. Faster (~30%%) but uses more VRAM")
+    parser.add_argument("--eval-batch-size", type=int, default=8,
+                        help="Real GPU batch size for post-training eval (no gradients)")
+    parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--output-dir", type=str, default="results/sft")
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed — must match training seed to avoid eval/train overlap")
     args = parser.parse_args()
 
     train_sft(
         model_name=args.model,
-        n_train=args.n_train,
-        n_eval=args.n_eval,
+        train_ratio=args.train_ratio,
         epochs=args.epochs,
         lr=args.lr,
         batch_size=args.batch_size,
+        gradient_accumulation=args.grad_accum,
+        eval_batch_size=args.eval_batch_size,
+        gradient_checkpointing=not args.no_grad_checkpoint,
+        max_new_tokens=args.max_new_tokens,
         output_dir=args.output_dir,
         device=args.device,
+        seed=args.seed,
     )

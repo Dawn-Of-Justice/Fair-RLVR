@@ -3,9 +3,18 @@ torchvision>=0.15.0
 transformers>=4.40.0
 datasets>=2.14.0
 peft>=0.10.0
+<<<<<<< HEAD
 trl>=0.12.0
 accelerate>=0.30.0
 bitsandbytes>=0.43.0
+=======
+trl>=0.16.0
+accelerate>=0.30.0
+bitsandbytes>=0.43.0
+flash-attn>=2.5.0
+pyyaml>=6.0
+scikit-learn>=1.3.0
+>>>>>>> b6243d80cdd9368f50b353268fe14f2213d6adf0
 tqdm>=4.60.0
 numpy>=1.24.0
 pandas>=2.0.0
