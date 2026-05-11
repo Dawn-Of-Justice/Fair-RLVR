@@ -2,10 +2,15 @@
 BBQ Dataset Pipeline for Fair-RLVR
 
 Loads the Bias Benchmark for Question Answering (BBQ), formats prompts,
-and creates balanced train/eval splits for GRPO training.
+and creates template-family-aware train/eval splits for GRPO training.
+
+Split strategy: groups examples by (category, question_index) so that all
+ambiguous/disambiguated variants and demographic fills of the same template
+family always land in the same split — preventing near-duplicate leakage.
 """
 
 import random
+from collections import defaultdict
 from typing import Optional
 from datasets import load_dataset, concatenate_datasets, Dataset
 
@@ -64,6 +69,23 @@ def option_to_label(option: str) -> int:
     return mapping.get(option, -1)
 
 
+def get_unknown_label(example: dict) -> int:
+    """
+    Return the index (0/1/2) of the 'Unknown / Cannot be determined' answer option.
+
+    BBQ stores this in the 'unknown_label' field. Falls back to checking answer
+    text if the field is absent (for compatibility with older dataset versions).
+    """
+    if "unknown_label" in example and example["unknown_label"] is not None:
+        return int(example["unknown_label"])
+    # Fallback: scan answer texts for "unknown" indicator
+    for idx, key in enumerate(["ans0", "ans1", "ans2"]):
+        text = str(example.get(key, "")).lower()
+        if "unknown" in text or "cannot" in text or "can't" in text or "not enough" in text:
+            return idx
+    return 2  # last-resort default
+
+
 def load_bbq_all(categories: Optional[list] = None) -> Dataset:
     """
     Load and concatenate all BBQ category splits into a single dataset.
@@ -93,109 +115,109 @@ def load_bbq_intersectional() -> Dataset:
 
 
 def create_splits(
-    n_train: int = 1000,
-    n_eval: int = 500,
-    ambiguous_ratio: float = 0.7,
+    n_train: Optional[int] = None,
+    n_eval: Optional[int] = None,
     seed: int = 42,
     holdout_categories: Optional[list] = None,
+    sort_by_family: bool = False,
 ) -> dict:
     """
-    Create balanced train/eval splits from BBQ.
+    Create template-family-aware train/eval splits from BBQ.
+
+    Groups examples by (category, question_index) so all ambiguous/disambiguated
+    and demographic variants of the same template family land in the same split.
+    This prevents near-duplicate leakage that inflates eval scores.
 
     Args:
-        n_train: Number of training samples.
-        n_eval: Number of evaluation samples.
-        ambiguous_ratio: Fraction of ambiguous context samples in training set.
-        seed: Random seed for reproducibility.
+        n_train: Max training samples. If None, uses all available (~52,643).
+        n_eval: Max eval samples per condition. If None, uses all available (~5,849 total).
+        seed: Random seed for reproducibility (must be 42 across all scripts).
         holdout_categories: Categories to hold out entirely for OOD eval.
-            Defaults to ["religion", "sexual_orientation"].
+            All 9 base categories are used for training; holdout only affects OOD split.
+        sort_by_family: If True, sort training set by question_index so sibling
+            variants land in the same GRPO batch (required for R_consistency).
 
     Returns:
         Dictionary with keys:
-            - "train": training dataset (formatted)
+            - "train": training dataset (formatted, all 9 base categories)
             - "eval_ambiguous": eval set, ambiguous context only
             - "eval_disambiguated": eval set, disambiguated context only
-            - "eval_holdout": held-out categories for OOD testing
+            - "eval_holdout": holdout categories for OOD testing
             - "eval_intersectional": intersectional categories for OOD testing
     """
     if holdout_categories is None:
-        holdout_categories = ["religion", "sexual_orientation"]
+        holdout_categories = []
 
-    random.seed(seed)
+    rng = random.Random(seed)
 
-    # Separate train and holdout categories
-    train_categories = [c for c in BBQ_CATEGORIES if c not in holdout_categories]
-
-    # Load datasets
-    train_pool = load_bbq_all(train_categories)
-    holdout_pool = load_bbq_all(holdout_categories)
+    # Load all 9 base categories — ALL are used for training (no holdout from train)
+    full_pool = load_bbq_all(BBQ_CATEGORIES)
     intersectional_pool = load_bbq_intersectional()
 
-    # Group indices by (category, context_condition)
-    cat_cond_indices = {}
-    for i, ex in enumerate(train_pool):
-        key = (ex["category"], ex["context_condition"])
-        cat_cond_indices.setdefault(key, []).append(i)
+    # ── Template-family-aware 90/10 split ─────────────────
+    # Group indices by (category, question_index) — each group is a template family
+    family_to_indices = defaultdict(list)
+    for i, ex in enumerate(full_pool):
+        family_key = (ex["category"], ex["question_index"])
+        family_to_indices[family_key].append(i)
 
-    # Shuffle each group
-    for key in cat_cond_indices:
-        random.shuffle(cat_cond_indices[key])
+    all_families = list(family_to_indices.keys())
+    rng.shuffle(all_families)
 
-    # Balanced sampling: equal samples per category, then split ambig/disambig within each
-    n_cats = len(train_categories)
-    per_cat = n_train // n_cats
-    n_ambig_per_cat = int(per_cat * ambiguous_ratio)
-    n_disambig_per_cat = per_cat - n_ambig_per_cat
+    # 90% of families → train, 10% → eval
+    split_point = int(len(all_families) * 0.9)
+    train_families = set(all_families[:split_point])
+    eval_families = set(all_families[split_point:])
 
     train_indices = []
-    for cat in train_categories:
-        cat_title = cat.replace("_", " ").title().replace(" ", "_")
-        # Try both naming conventions
-        ambig_key = None
-        disambig_key = None
-        for key in cat_cond_indices:
-            if key[0].lower().replace("_", "") == cat.lower().replace("_", "") and key[1] == "ambig":
-                ambig_key = key
-            if key[0].lower().replace("_", "") == cat.lower().replace("_", "") and key[1] == "disambig":
-                disambig_key = key
+    eval_ambig_indices = []
+    eval_disambig_indices = []
 
-        if ambig_key:
-            train_indices.extend(cat_cond_indices[ambig_key][:n_ambig_per_cat])
-        if disambig_key:
-            train_indices.extend(cat_cond_indices[disambig_key][:n_disambig_per_cat])
+    for family_key, indices in family_to_indices.items():
+        if family_key in train_families:
+            train_indices.extend(indices)
+        else:
+            for i in indices:
+                cond = full_pool[i]["context_condition"]
+                if cond == "ambig":
+                    eval_ambig_indices.append(i)
+                else:
+                    eval_disambig_indices.append(i)
 
-    random.shuffle(train_indices)
+    # ── Optionally subsample (dry-run / ablation) ─────────
+    if n_train is not None and n_train < len(train_indices):
+        rng.shuffle(train_indices)
+        train_indices = train_indices[:n_train]
+    elif sort_by_family:
+        # Sort by question_index to co-batch sibling variants (for R_consistency)
+        train_indices = sorted(
+            train_indices,
+            key=lambda i: (full_pool[i]["category"], full_pool[i]["question_index"]),
+        )
+    else:
+        rng.shuffle(train_indices)
 
-    # Collect remaining indices for eval
-    train_set = set(train_indices)
-    ambig_indices = [i for i in range(len(train_pool))
-                     if i not in train_set and train_pool[i]["context_condition"] == "ambig"]
-    disambig_indices = [i for i in range(len(train_pool))
-                        if i not in train_set and train_pool[i]["context_condition"] == "disambig"]
+    if n_eval is not None:
+        rng.shuffle(eval_ambig_indices)
+        rng.shuffle(eval_disambig_indices)
+        eval_ambig_indices = eval_ambig_indices[:n_eval]
+        eval_disambig_indices = eval_disambig_indices[:n_eval]
 
-    random.shuffle(ambig_indices)
-    random.shuffle(disambig_indices)
+    # ── Build HuggingFace datasets ─────────────────────────
+    train_ds = full_pool.select(train_indices)
+    eval_ambig_ds = full_pool.select(eval_ambig_indices)
+    eval_disambig_ds = full_pool.select(eval_disambig_indices)
 
-    # Eval indices
-    eval_ambig_idx = ambig_indices[:n_eval]
-    eval_disambig_idx = disambig_indices[:n_eval]
+    # OOD holdout split (from holdout_categories, if any)
+    if holdout_categories:
+        holdout_ds = load_bbq_all(holdout_categories).map(_add_fields)
+    else:
+        holdout_ds = Dataset.from_list([])
 
-    # Build datasets
-    train_ds = train_pool.select(train_indices)
-    eval_ambig_ds = train_pool.select(eval_ambig_idx)
-    eval_disambig_ds = train_pool.select(eval_disambig_idx)
-
-    # Format all datasets with prompt column
-    def add_prompt(example):
-        example["prompt"] = format_bbq_prompt(example)
-        example["answer_option"] = label_to_option(example["answer_label"])
-        return example
-
-    train_ds = train_ds.map(add_prompt)
-    eval_ambig_ds = eval_ambig_ds.map(add_prompt)
-    eval_disambig_ds = eval_disambig_ds.map(add_prompt)
-    holdout_ds = holdout_pool.map(add_prompt)
-    intersectional_ds = intersectional_pool.map(add_prompt)
+    train_ds = train_ds.map(_add_fields)
+    eval_ambig_ds = eval_ambig_ds.map(_add_fields)
+    eval_disambig_ds = eval_disambig_ds.map(_add_fields)
+    intersectional_ds = intersectional_pool.map(_add_fields)
 
     return {
         "train": train_ds,
@@ -206,6 +228,14 @@ def create_splits(
     }
 
 
+def _add_fields(example: dict) -> dict:
+    """Add prompt, answer_option, and unknown_label fields to a BBQ example."""
+    example["prompt"] = format_bbq_prompt(example)
+    example["answer_option"] = label_to_option(example["answer_label"])
+    example["unknown_label"] = get_unknown_label(example)
+    return example
+
+
 def format_for_grpo(dataset: Dataset) -> list[dict]:
     """
     Format dataset for GRPOTrainer.
@@ -213,8 +243,10 @@ def format_for_grpo(dataset: Dataset) -> list[dict]:
     Returns a list of dicts with:
         - "prompt": list of messages (system + user)
         - "answer_label": ground truth label index
+        - "unknown_label": index of the "Unknown" answer option for this question
         - "category": BBQ category
         - "context_condition": ambig or disambig
+        - "question_index": template family identifier
     """
     formatted = []
     for example in dataset:
@@ -225,40 +257,53 @@ def format_for_grpo(dataset: Dataset) -> list[dict]:
         formatted.append({
             "prompt": messages,
             "answer_label": example["answer_label"],
+            "unknown_label": example.get("unknown_label", 2),
             "category": example["category"],
             "context_condition": example["context_condition"],
+            "question_index": example.get("question_index", -1),
         })
     return formatted
 
 
 # ── Quick test ──────────────────────────────────────────────
 if __name__ == "__main__":
-    print("Loading BBQ dataset...")
-    splits = create_splits(n_train=100, n_eval=50, seed=42)
+    print("Loading BBQ dataset with template-family-aware split...")
+    splits = create_splits(seed=42)
 
-    print(f"\nTrain size: {len(splits['train'])}")
-    print(f"Eval (ambiguous): {len(splits['eval_ambiguous'])}")
-    print(f"Eval (disambiguated): {len(splits['eval_disambiguated'])}")
-    print(f"Eval (holdout): {len(splits['eval_holdout'])}")
-    print(f"Eval (intersectional): {len(splits['eval_intersectional'])}")
+    print(f"\nTrain size:               {len(splits['train'])}")
+    print(f"Eval (ambiguous):         {len(splits['eval_ambiguous'])}")
+    print(f"Eval (disambiguated):     {len(splits['eval_disambiguated'])}")
+    print(f"Eval (intersectional):    {len(splits['eval_intersectional'])}")
 
-    # Print 5 samples
+    # Verify no question_index overlap between train and eval
+    train_families = set(
+        (ex["category"], ex["question_index"]) for ex in splits["train"]
+    )
+    eval_families = set(
+        (ex["category"], ex["question_index"]) for ex in splits["eval_ambiguous"]
+    ) | set(
+        (ex["category"], ex["question_index"]) for ex in splits["eval_disambiguated"]
+    )
+    overlap = train_families & eval_families
+    print(f"\nTemplate family overlap between train/eval: {len(overlap)} (should be 0)")
+
+    # Verify unknown_label field is present
+    sample = splits["train"][0]
+    print(f"\nSample unknown_label: {sample['unknown_label']} (should be 0, 1, or 2)")
+
+    # Print 3 samples
     print("\n" + "=" * 60)
     print("SAMPLE TRAINING PROMPTS")
     print("=" * 60)
-    for i in range(5):
+    for i in range(3):
         ex = splits["train"][i]
         print(f"\n--- Sample {i+1} [{ex['category']}] [{ex['context_condition']}] ---")
         print(ex["prompt"])
-        print(f"Correct answer: {ex['answer_option']} (label={ex['answer_label']})")
+        print(f"Correct answer: {ex['answer_option']} (label={ex['answer_label']}, unknown_label={ex['unknown_label']})")
 
-    # Verify category distribution
+    # Category distribution
     from collections import Counter
     cats = Counter(splits["train"]["category"])
     print("\n\nCategory distribution in training set:")
     for cat, count in sorted(cats.items()):
         print(f"  {cat}: {count}")
-
-    # Verify ambig/disambig ratio
-    conditions = Counter(splits["train"]["context_condition"])
-    print(f"\nContext conditions: {dict(conditions)}")

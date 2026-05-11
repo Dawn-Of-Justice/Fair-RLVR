@@ -3,21 +3,23 @@
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
-# Data — minimal
+# Data — minimal (overridden by --dry-run flag in train.py)
 n_train: 20
 n_eval: 10
 
 # Reward
 lambda_fair: 0.5
-tau: 0.85
+alpha_consistency: 0.0
 
 # Training — minimal
 learning_rate: 1.0e-5
 num_train_steps: 5
-group_size: 4
+group_size: 2
 batch_size: 4
 gradient_accumulation: 1
 kl_coeff: 0.01
+clip_ratio_low: 0.20
+clip_ratio_high: 0.28
 
 # LoRA
 lora_r: 8

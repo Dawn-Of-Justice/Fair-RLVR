@@ -8,21 +8,23 @@
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
-# Data
-n_train: 1000
-n_eval: 500
+# Data — full dataset
+n_train: null
+n_eval: null
 
-# Reward — lambda overridden via CLI
+# Reward — lambda overridden via CLI; alpha=0 keeps this a pure lambda sweep
 lambda_fair: 0.5
-tau: 0.85
+alpha_consistency: 0.0
 
 # Training
 learning_rate: 1.0e-5
-num_train_steps: 1000
-group_size: 16
+num_train_steps: 3500
+group_size: 2
 batch_size: 8
 gradient_accumulation: 2
 kl_coeff: 0.01
+clip_ratio_low: 0.20
+clip_ratio_high: 0.28
 
 # LoRA
 lora_r: 16
@@ -30,5 +32,5 @@ lora_alpha: 32
 
 # Output — overridden via CLI
 output_dir: "results/lambda_sweep"
-save_steps: 250
+save_steps: 500
 seed: 42

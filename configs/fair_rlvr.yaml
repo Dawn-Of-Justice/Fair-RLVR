@@ -3,21 +3,25 @@
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
-# Data
-n_train: 1000
-n_eval: 500
+# Data — full dataset (~52,643 train / ~5,849 eval via template-family-aware split)
+n_train: null
+n_eval: null
 
-# Reward
+# Reward: R_total = lambda_fair * R_fairness + alpha_consistency * R_consistency - P_structural
 lambda_fair: 0.5
-tau: 0.85
+alpha_consistency: 0.0  # set to 0.25 to enable counterfactual consistency bonus
 
 # Training
 learning_rate: 1.0e-5
-num_train_steps: 1000
-group_size: 16
+num_train_steps: 3500
+group_size: 2        # G=2 is sufficient for 3-choice MCQA; raise to 4+ if entropy collapses
 batch_size: 8
 gradient_accumulation: 2
 kl_coeff: 0.01
+
+# DAPO asymmetric clipping (arXiv:2503.14476)
+clip_ratio_low: 0.20
+clip_ratio_high: 0.28
 
 # LoRA
 lora_r: 16
@@ -25,5 +29,5 @@ lora_alpha: 32
 
 # Output
 output_dir: "results/fair_rlvr"
-save_steps: 250
+save_steps: 500
 seed: 42
