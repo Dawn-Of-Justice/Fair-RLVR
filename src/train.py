@@ -429,19 +429,28 @@ def train(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    # ── Model kwargs ──────────────────────────────────────
-    model_kwargs = {
+    # ── Load model ────────────────────────────────────────
+    # Pre-load so we are not dependent on TRL's model_init_kwargs (not present
+    # in all TRL >=0.12 builds). With 4-bit we also call
+    # prepare_model_for_kbit_training before handing off to TRL/PEFT.
+    print(f"\nLoading model: {model_name}")
+    model_kwargs: dict = {
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16,
         "attn_implementation": "sdpa",
     }
-
     if use_4bit:
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
+        )
+    base_model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+    if use_4bit:
+        from peft import prepare_model_for_kbit_training
+        base_model = prepare_model_for_kbit_training(
+            base_model, use_gradient_checkpointing=gradient_checkpointing
         )
 
     # ── LoRA config ───────────────────────────────────────
@@ -512,7 +521,7 @@ def train(
         epsilon=clip_ratio_low,
         epsilon_high=clip_ratio_high,
         lr_scheduler_type=lr_scheduler_type,
-        warmup_ratio=warmup_ratio,
+        warmup_steps=max(1, int(num_train_steps * warmup_ratio)),
         logging_steps=logging_steps,
         save_steps=save_steps,
         save_total_limit=3,
@@ -528,14 +537,13 @@ def train(
     # ── Initialize trainer ────────────────────────────────
     print("\nInitializing FairGRPOTrainer...")
     trainer = FairGRPOTrainer(
-        model=model_name,
+        model=base_model,
         args=training_config,
         train_dataset=train_dataset,
         reward_funcs=reward_fn,
         peft_config=peft_config,
         processing_class=tokenizer,
         callbacks=[fair_callback],
-        model_init_kwargs=model_kwargs,   # applies BitsAndBytesConfig when use_4bit=True
         use_family_sampler=(alpha_consistency > 0),
         sampler_seed=seed,
     )
