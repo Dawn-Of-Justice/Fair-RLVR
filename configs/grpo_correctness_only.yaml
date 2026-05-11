@@ -4,9 +4,8 @@
 
 model_name: "Qwen/Qwen2.5-3B-Instruct"
 
-# Data — full dataset
-n_train: null
-n_eval: null
+# Data — full 90/10 split of BBQ (same split as main experiment; seed must match)
+train_ratio: 0.9
 
 # Reward — lambda=0 disables fairness reward; alpha=0 disables consistency bonus
 lambda_fair: 0.0

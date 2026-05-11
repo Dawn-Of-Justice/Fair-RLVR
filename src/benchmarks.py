@@ -90,7 +90,7 @@ MMLU_SUBJECTS = [
 
 def eval_mmlu(model, tokenizer, n_samples=500, seed=42):
     """
-    Evaluate on MMLU (5-shot format, multiple choice).
+    Evaluate on MMLU (zero-shot, multiple choice).
 
     Args:
         model: loaded model

@@ -111,7 +111,7 @@ For training, we use both ambiguous-context and disambiguated questions from the
 The reward function combines a fairness signal and an automated structural penalty:
 
 \begin{equation}
-R_{\text{total}} = \lambda \cdot R_{\text{fairness}} - P_{\text{structural}}
+R_{\text{total}} = \lambda \cdot R_{\text{fairness}} + \alpha \cdot R_{\text{consistency}} - P_{\text{structural}}
 \label{eq:reward}
 \end{equation}
 
@@ -119,7 +119,8 @@ R_{\text{total}} = \lambda \cdot R_{\text{fairness}} - P_{\text{structural}}
 
 \begin{itemize}
     \item $R_{\text{fairness}}$ compares the model's answer against the BBQ ground-truth label: $+1$ for a match, $0$ for a mismatch.
-    \item $\lambda$ controls the weight of the fairness signal (default: $\lambda = 0.5$), giving a maximum possible reward of $\lambda \cdot 1.0 = 0.5$.
+    \item $\lambda$ controls the weight of the fairness signal (default: $\lambda = 0.5$). Maximum reward at $\alpha = 0$ is $\lambda + \alpha = 0.5$.
+    \item $R_{\text{consistency}}$ is a counterfactual-consistency bonus (adapted from Ravulu et al.\ \cite{szalouk_rlhf_bias} CDA): $+1.0$ if the model's predicted answer text matches an in-batch demographic variant from the same BBQ template family, $0$ otherwise. $\alpha = 0$ (disabled) by default; $\alpha = 0.25$ activates the bonus.
     \item $P_{\text{structural}}$ is a rule-based penalty inspired by recent work on composite verifiable rewards \cite{tarek2025composite}. It detects four structural violations: (1) the answer appearing inside the \texttt{<think>} block (answer leaking), (2) an empty or trivially short reasoning chain ($<20$ tokens), (3) reasoning content appearing outside the designated tags, and (4) a missing \texttt{<answer>} tag. Each violation incurs a fixed penalty of $0.3$, for a maximum total penalty of $1.2$.
 \end{itemize}
 
@@ -127,7 +128,7 @@ A separate semantic leakage penalty based on Sentence-BERT cosine similarity bet
 
 \subsection{Training with GRPO}
 
-We use Group Relative Policy Optimization (GRPO) \cite{deepseekmath} for training. For each input prompt, $G = 8$ candidate outputs are sampled. The reward $R_i$ is computed for each output, and advantages are normalized within the group:
+We use Group Relative Policy Optimization (GRPO) \cite{deepseekmath} for training. For each input prompt, $G = 2$ candidate outputs are sampled. The reward $R_i$ is computed for each output, and advantages are normalized within the group:
 
 \begin{equation}
 A_i = \frac{R_i - \mu(R)}{\sigma(R)}
@@ -150,7 +151,7 @@ Quantization & 4-bit (bitsandbytes) \\
 Adaptation & LoRA ($r=16$, $\alpha=32$) \\
 Hardware & 1$\times$ NVIDIA H100 (80 GB) \\
 Learning Rate & $1 \times 10^{-5}$ \\
-Group Size ($G$) & 16 \\
+Group Size ($G$) & 2 \\
 Batch Size & 8 (gradient accumulation: 2) \\
 Max New Tokens & 512 \\
 KL Coefficient & 0.01 \\
@@ -169,7 +170,7 @@ The model is initialized with a system prompt that instructs it to use \texttt{<
 % TODO: Insert methodology diagram here
 % \begin{figure}[htbp]
 % \centerline{\includegraphics[width=\columnwidth]{methodology_diagram.png}}
-% \caption{Overview of the Fair-RLVR training pipeline. BBQ prompts are sampled and passed to the model, which generates $G=8$ candidate outputs. Each output is scored by the composite reward function. GRPO normalizes rewards within each group and updates the policy via clipped gradient ascent.}
+% \caption{Overview of the Fair-RLVR training pipeline. BBQ prompts are sampled and passed to the model, which generates $G=2$ candidate outputs. Each output is scored by the composite reward function. GRPO normalizes rewards within each group and updates the policy via clipped gradient ascent.}
 % \label{fig:methodology}
 % \end{figure}
 
@@ -337,7 +338,7 @@ The model identifies that the context provides insufficient evidence to distingu
 \section{Limitations}
 %% ============================================================
 
-Several limitations should be noted. First, BBQ is Western-centric, focused on U.S. English social categories; generalization to global cultural contexts remains untested. Second, our experiments are limited to a single model size (3B parameters) due to hardware constraints, and scaling behavior is unknown. Third, training and evaluating on BBQ creates a risk of benchmark overfitting, which we mitigate through held-out category evaluation but cannot fully eliminate. Fourth, all conditions show 0\% abstention rate, suggesting the model never explicitly outputs ``Unknown'' even when correct---it selects the correct option index rather than generating the word, which limits our ability to analyze abstention behavior directly. Fifth, the lambda ablation shows that all $\lambda$ values perform well, which may indicate that the model is partially leveraging pre-training knowledge rather than learning entirely new fairness reasoning from the reward signal alone. Sixth, the low causal faithfulness score (0.010) indicates that the chain-of-thought may be partially post-hoc, and the model's fair behavior may be driven by internal representations not fully captured in the generated text.
+Several limitations should be noted. First, BBQ is Western-centric, focused on U.S. English social categories; generalization to global cultural contexts remains untested. Second, our experiments are limited to a single model size (3B parameters) due to hardware constraints, and scaling behavior is unknown. Third, training and evaluating on BBQ creates a risk of benchmark overfitting, which we mitigate through held-out category evaluation but cannot fully eliminate. Fourth, abstention rates vary across conditions; the zero-shot baseline shows non-trivial abstention ($\sim$20\%), so abstention comparisons require careful per-question unknown-label indexing (always option index 0, 1, or 2, not a fixed position) rather than keyword heuristics. Results on abstention behavior are pending full evaluation. Fifth, the lambda ablation shows that all $\lambda$ values perform well, which may indicate that the model is partially leveraging pre-training knowledge rather than learning entirely new fairness reasoning from the reward signal alone. Sixth, the low causal faithfulness score (0.010) indicates that the chain-of-thought may be partially post-hoc, and the model's fair behavior may be driven by internal representations not fully captured in the generated text.
 
 %% ============================================================
 \section{Conclusion}
