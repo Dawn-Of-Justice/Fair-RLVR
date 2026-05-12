@@ -1,0 +1,20 @@
+{
+  "winobias": {
+    "error": "Failed to load WinoBias dataset",
+    "note": "Dataset: uclanlp/winobias"
+  },
+  "stereoset": {
+    "error": "No valid StereoSet examples processed."
+  },
+  "intersectional_bbq": {
+    "n_samples": 27120,
+    "accuracy_ambiguous": 0.7372418879056047,
+    "accuracy_disambiguated": 0.0008112094395280236,
+    "bias_score_bbq_ambig": -0.0017926380524071399,
+    "bias_score_bbq_disambig": -0.9974038941587619,
+    "categories": [
+      "Race_x_gender",
+      "Race_x_SES"
+    ]
+  }
+}
