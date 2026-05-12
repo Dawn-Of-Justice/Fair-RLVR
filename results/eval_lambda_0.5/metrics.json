@@ -1,0 +1,174 @@
+{
+  "accuracy": {
+    "accuracy_overall": 0.9765861027190332,
+    "accuracy_ambiguous": 0.9811178247734139,
+    "accuracy_disambiguated": 0.9720543806646526,
+    "n_ambiguous": 1324,
+    "n_disambiguated": 1324
+  },
+  "bias": {
+    "bias_score": -0.016805784823662528,
+    "bias_score_bbq": -0.016805784823662528,
+    "bias_score_bbq_ambig": -0.016805784823662528,
+    "bias_score_bbq_disambig": 0.03407155025553665,
+    "bias_score_simplified": 0.6290322580645161,
+    "ambig_all": 1324,
+    "ambig_correct": 1299,
+    "ambig_non_unk": 291,
+    "ambig_target_non_unk": 16,
+    "disambig_non_unk": 1174,
+    "disambig_target_non_unk": 607,
+    "total_errors": 62,
+    "stereotype_errors": 39,
+    "per_category": {
+      "Age": {
+        "bias_score_bbq_ambig": -0.0373376623376623,
+        "bias_score_bbq_disambig": 0.05531914893617018,
+        "bias_score_simplified": 0.6060606060606061,
+        "ambig_non_unk": 56,
+        "ambig_target_non_unk": 5,
+        "ambig_accuracy": 0.9545454545454546,
+        "errors": 33,
+        "stereotype_errors": 20
+      },
+      "Disability_status": {
+        "bias_score_bbq_ambig": -0.005208333333333334,
+        "bias_score_bbq_disambig": -0.033333333333333326,
+        "bias_score_simplified": 0.3333333333333333,
+        "ambig_non_unk": 3,
+        "ambig_target_non_unk": 1,
+        "ambig_accuracy": 0.984375,
+        "errors": 6,
+        "stereotype_errors": 2
+      },
+      "Gender_identity": {
+        "bias_score_bbq_ambig": -0.0,
+        "bias_score_bbq_disambig": 0.09090909090909083,
+        "bias_score_simplified": 0.0,
+        "ambig_non_unk": 2,
+        "ambig_target_non_unk": 0,
+        "ambig_accuracy": 1.0,
+        "errors": 0,
+        "stereotype_errors": 0
+      },
+      "Nationality": {
+        "bias_score_bbq_ambig": -0.015601023017902857,
+        "bias_score_bbq_disambig": 0.019607843137254832,
+        "bias_score_simplified": 0.7142857142857143,
+        "ambig_non_unk": 69,
+        "ambig_target_non_unk": 4,
+        "ambig_accuracy": 0.9823529411764705,
+        "errors": 7,
+        "stereotype_errors": 5
+      },
+      "Physical_appearance": {
+        "bias_score_bbq_ambig": -0.011363636363636322,
+        "bias_score_bbq_disambig": 0.09090909090909083,
+        "bias_score_simplified": 0.8333333333333334,
+        "ambig_non_unk": 11,
+        "ambig_target_non_unk": 1,
+        "ambig_accuracy": 0.9861111111111112,
+        "errors": 6,
+        "stereotype_errors": 5
+      },
+      "Race_ethnicity": {
+        "bias_score_bbq_ambig": -0.0,
+        "bias_score_bbq_disambig": 0.012820512820512775,
+        "bias_score_simplified": 0.0,
+        "ambig_non_unk": 48,
+        "ambig_target_non_unk": 0,
+        "ambig_accuracy": 1.0,
+        "errors": 0,
+        "stereotype_errors": 0
+      },
+      "Religion": {
+        "bias_score_bbq_ambig": -0.031249999999999972,
+        "bias_score_bbq_disambig": 0.06000000000000005,
+        "bias_score_simplified": 0.7777777777777778,
+        "ambig_non_unk": 40,
+        "ambig_target_non_unk": 5,
+        "ambig_accuracy": 0.9583333333333334,
+        "errors": 9,
+        "stereotype_errors": 7
+      },
+      "SES": {
+        "bias_score_bbq_ambig": -0.0,
+        "bias_score_bbq_disambig": 0.037735849056603765,
+        "bias_score_simplified": 0.0,
+        "ambig_non_unk": 56,
+        "ambig_target_non_unk": 0,
+        "ambig_accuracy": 1.0,
+        "errors": 0,
+        "stereotype_errors": 0
+      },
+      "Sexual_orientation": {
+        "bias_score_bbq_ambig": -0.0,
+        "bias_score_bbq_disambig": 0.0,
+        "bias_score_simplified": 0.0,
+        "ambig_non_unk": 6,
+        "ambig_target_non_unk": 0,
+        "ambig_accuracy": 1.0,
+        "errors": 1,
+        "stereotype_errors": 0
+      }
+    }
+  },
+  "group_fairness": {
+    "dpd": 0.05034722222222221,
+    "eod": 0.1111111111111111,
+    "dir": 0.9342403628117913,
+    "rb": 0.2590634441087613,
+    "per_category_target_rate": {
+      "Age": 0.2727272727272727,
+      "Disability_status": 0.2421875,
+      "Gender_identity": 0.25,
+      "Nationality": 0.25588235294117645,
+      "Physical_appearance": 0.2847222222222222,
+      "Race_ethnicity": 0.25,
+      "Religion": 0.2708333333333333,
+      "SES": 0.25,
+      "Sexual_orientation": 0.234375
+    },
+    "per_category_eod_rate": {
+      "Age": 0.09090909090909091,
+      "Disability_status": 0.03125,
+      "Gender_identity": 0.0,
+      "Nationality": 0.0,
+      "Physical_appearance": 0.1111111111111111,
+      "Race_ethnicity": 0.0,
+      "Religion": 0.03333333333333333,
+      "SES": 0.0,
+      "Sexual_orientation": 0.0
+    },
+    "per_category_non_target_rate": {
+      "Age": 0.7272727272727273,
+      "Disability_status": 0.7578125,
+      "Gender_identity": 0.75,
+      "Nationality": 0.7441176470588236,
+      "Physical_appearance": 0.7152777777777778,
+      "Race_ethnicity": 0.75,
+      "Religion": 0.7291666666666666,
+      "SES": 0.75,
+      "Sexual_orientation": 0.765625
+    },
+    "n_used": 2648
+  },
+  "abstention": {
+    "abstention_rate_overall": 0.4467522658610272,
+    "abstention_rate_ambiguous": 0.7802114803625377,
+    "abstention_rate_disambiguated": 0.11329305135951662
+  },
+  "summary": {
+    "bbq_accuracy_ambig": 0.9811178247734139,
+    "bbq_accuracy_disambig": 0.9720543806646526,
+    "bias_score_bbq": -0.016805784823662528,
+    "bias_score_bbq_ambig": -0.016805784823662528,
+    "bias_score_bbq_disambig": 0.03407155025553665,
+    "bias_score_simplified": 0.6290322580645161,
+    "dpd": 0.05034722222222221,
+    "eod": 0.1111111111111111,
+    "dir": 0.9342403628117913,
+    "rb": 0.2590634441087613,
+    "abstention_overall": 0.4467522658610272
+  }
+}
