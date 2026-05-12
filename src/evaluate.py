@@ -683,7 +683,7 @@ def evaluate_winobias(
     any_loaded = False
     for split_name, is_pro in split_configs:
         try:
-            ds = load_dataset("uclanlp/winobias", split=split_name)
+            ds = load_dataset("uclanlp/winobias", split_name, split="train")
             parsed = [_parse_wb(ex.get("tokens", []), is_pro) for ex in ds]
             parsed = [p for p in parsed if p is not None]
             (pro_examples if is_pro else anti_examples).extend(parsed)
@@ -797,16 +797,23 @@ def evaluate_stereoset(
         if not sentences or len(sentences) < 3:
             continue
 
+        # gold_label is a ClassLabel — HF returns ints: 0=anti-stereotype, 1=stereotype, 2=unrelated
+        _SS_LABELS = {0: "anti-stereotype", 1: "stereotype", 2: "unrelated"}
+
         options_by_label = {}
         if isinstance(sentences, dict):
             for txt, lbl in zip(
                 sentences.get("sentence", []), sentences.get("gold_label", [])
             ):
+                if isinstance(lbl, int):
+                    lbl = _SS_LABELS.get(lbl, "")
                 if lbl in ("stereotype", "anti-stereotype", "unrelated") and lbl not in options_by_label:
                     options_by_label[lbl] = txt
         elif isinstance(sentences, list):
             for s in sentences:
                 lbl = s.get("gold_label", "")
+                if isinstance(lbl, int):
+                    lbl = _SS_LABELS.get(lbl, "")
                 if lbl in ("stereotype", "anti-stereotype", "unrelated") and lbl not in options_by_label:
                     options_by_label[lbl] = s.get("sentence", "")
 
