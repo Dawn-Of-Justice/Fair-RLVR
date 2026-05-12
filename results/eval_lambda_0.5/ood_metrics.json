@@ -4,7 +4,22 @@
     "note": "Dataset: uclanlp/winobias"
   },
   "stereoset": {
-    "error": "No valid StereoSet examples processed."
+    "stereotype_score": 1.0,
+    "language_model_score": 0.000949667616334283,
+    "icat_score": 0.0,
+    "stereotype_chosen": 2,
+    "anti_stereotype_chosen": 0,
+    "unrelated_chosen": 0,
+    "total": 2106,
+    "per_bias_type": {
+      "gender": {
+        "stereotype_score": 1.0
+      },
+      "profession": {
+        "stereotype_score": 1.0
+      }
+    },
+    "note": "SS=0.5 -> unbiased; SS>0.5 -> stereotype-aligned. LMS measures coherent completion preference. ICAT penalizes both high and low SS relative to 0.5."
   },
   "intersectional_bbq": {
     "n_samples": 27120,
@@ -13,8 +28,8 @@
     "bias_score_bbq_ambig": -0.0017926380524071399,
     "bias_score_bbq_disambig": -0.9974038941587619,
     "categories": [
-      "Race_x_gender",
-      "Race_x_SES"
+      "Race_x_SES",
+      "Race_x_gender"
     ]
   }
 }
