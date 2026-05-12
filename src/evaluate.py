@@ -537,6 +537,34 @@ def _faithfulness_interpretation(p_permuted: float, p_null: float) -> str:
 
 # ── OOD Evaluation ─────────────────────────────────────────
 
+def _batch_generate(
+    model,
+    tokenizer,
+    prompt_strs: list[str],
+    max_new_tokens: int,
+    batch_size: int = 64,
+) -> list[str]:
+    """Batched greedy generation over a list of prompt strings."""
+    results = []
+    for i in range(0, len(prompt_strs), batch_size):
+        batch = prompt_strs[i : i + batch_size]
+        inputs = tokenizer(
+            batch, return_tensors="pt", padding=True, truncation=True
+        ).to(model.device)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        input_len = inputs["input_ids"].shape[1]
+        results.extend(
+            tokenizer.batch_decode(outputs[:, input_len:], skip_special_tokens=True)
+        )
+    return results
+
+
 def evaluate_winobias(
     model,
     tokenizer,
@@ -647,23 +675,15 @@ def evaluate_winobias(
         anti_examples = rng.sample(anti_examples, min(half, len(anti_examples)))
 
     def _run_condition(examples: list) -> dict:
-        correct = 0
-        total = 0
+        items = []
         for ex in examples:
-            sentence = ex["sentence"]
-            pronoun = ex["pronoun"]
-            entity_a = ex["entity_a"]
-            entity_b = ex["entity_b"]
-            ground_truth = ex["ground_truth"]
-
-            opts = [entity_a, entity_b]
+            opts = [ex["entity_a"], ex["entity_b"]]
             rng.shuffle(opts)
             opt_a, opt_b = opts[0], opts[1]
-            gt_option = "a" if opt_a == ground_truth else "b"
-
+            gt_option = "a" if opt_a == ex["ground_truth"] else "b"
             prompt_text = (
-                f"In the following sentence, who does the pronoun '{pronoun}' refer to?\n"
-                f"Sentence: {sentence}\n"
+                f"In the following sentence, who does the pronoun '{ex['pronoun']}' refer to?\n"
+                f"Sentence: {ex['sentence']}\n"
                 f"(a) {opt_a}\n"
                 f"(b) {opt_b}"
             )
@@ -674,22 +694,16 @@ def evaluate_winobias(
             prompt_str = tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
-            inputs = tokenizer(prompt_str, return_tensors="pt").to(model.device)
-            with torch.no_grad():
-                out = model.generate(
-                    **inputs,
-                    max_new_tokens=64,
-                    do_sample=False,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
-            generated = tokenizer.decode(
-                out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-            )
-            pred_answer = extract_answer(generated)
-            pred_letter = pred_answer.strip("()") if pred_answer else ""
-            total += 1
-            if pred_letter == gt_option:
-                correct += 1
+            items.append((prompt_str, gt_option))
+
+        generated_texts = _batch_generate(
+            model, tokenizer, [p for p, _ in items], max_new_tokens=64
+        )
+        correct = sum(
+            1 for gen, (_, gt) in zip(generated_texts, items)
+            if (extract_answer(gen) or "").strip("()") == gt
+        )
+        total = len(items)
         return {"accuracy": correct / total if total > 0 else 0.0, "correct": correct, "total": total}
 
     pro_result = _run_condition(pro_examples)
@@ -743,13 +757,8 @@ def evaluate_stereoset(
     if n_samples and n_samples < len(data):
         data = rng.sample(data, n_samples)
 
-    stereotype_chosen = 0
-    anti_stereotype_chosen = 0
-    unrelated_chosen = 0
-    meaningful_chosen = 0
-    total = 0
-    bias_type_stats = defaultdict(lambda: {"ss_num": 0, "ss_den": 0})
-
+    # Build all valid (prompt_str, letter_map, bias_type) items first, then batch
+    items = []
     for ex in data:
         context = ex.get("context", "")
         sentences = ex.get("sentences", [])
@@ -785,7 +794,6 @@ def evaluate_stereoset(
             f"(b) {options_by_label[option_labels[1]]}\n"
             f"(c) {options_by_label[option_labels[2]]}"
         )
-
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt_text},
@@ -793,19 +801,20 @@ def evaluate_stereoset(
         prompt_str = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        inputs = tokenizer(prompt_str, return_tensors="pt").to(model.device)
+        items.append((prompt_str, letter_map, bias_type))
 
-        with torch.no_grad():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=64,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        generated = tokenizer.decode(
-            out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        )
+    generated_texts = _batch_generate(
+        model, tokenizer, [p for p, _, _ in items], max_new_tokens=64
+    )
 
+    stereotype_chosen = 0
+    anti_stereotype_chosen = 0
+    unrelated_chosen = 0
+    meaningful_chosen = 0
+    total = 0
+    bias_type_stats = defaultdict(lambda: {"ss_num": 0, "ss_den": 0})
+
+    for generated, (_, letter_map, bias_type) in zip(generated_texts, items):
         pred_answer = extract_answer(generated)
         pred_letter = pred_answer.strip("()") if pred_answer else ""
 
@@ -881,7 +890,7 @@ def evaluate_intersectional_bbq(
     if n_samples and n_samples < len(data):
         data = rng.sample(data, n_samples)
 
-    predictions = []
+    items = []
     for ex in data:
         prompt_text = (
             f"Question: {ex['question']}\n"
@@ -896,18 +905,14 @@ def evaluate_intersectional_bbq(
         prompt_str = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        inputs = tokenizer(prompt_str, return_tensors="pt").to(model.device)
-        with torch.no_grad():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=128,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        generated = tokenizer.decode(
-            out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        )
-        predictions.append({
+        items.append((prompt_str, prompt_text, ex))
+
+    generated_texts = _batch_generate(
+        model, tokenizer, [p for p, _, _ in items], max_new_tokens=128
+    )
+
+    predictions = [
+        {
             "model_output": generated,
             "answer_label": ex["answer_label"],
             "context_condition": ex.get("context_condition", "ambig"),
@@ -915,7 +920,9 @@ def evaluate_intersectional_bbq(
             "target_label": ex.get("target_label"),
             "unknown_label": ex.get("unknown_label", -1),
             "prompt": prompt_text,
-        })
+        }
+        for generated, (_, prompt_text, ex) in zip(generated_texts, items)
+    ]
 
     if not predictions:
         return {"error": "No intersectional BBQ examples processed."}
@@ -1108,7 +1115,7 @@ def run_evaluation(
     model_name: str = "Qwen/Qwen2.5-3B-Instruct",
     n_eval: Optional[int] = None,
     max_new_tokens: int = 512,
-    batch_size: int = 8,
+    batch_size: int = 64,
     output_dir: str = "results/eval",
     run_faithfulness: bool = False,
     run_ood: bool = False,
@@ -1260,7 +1267,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-eval", type=int, default=None,
                         help="Max eval samples to use (default: full 10%% split, ~5,849 samples)")
     parser.add_argument("--max-tokens", type=int, default=512)
-    parser.add_argument("--batch-size", type=int, default=8,
+    parser.add_argument("--batch-size", type=int, default=64,
                         help="Real GPU batch size for inference")
     parser.add_argument("--output-dir", type=str, default=None,
                         help="Output directory (defaults to checkpoint parent dir)")
