@@ -1159,6 +1159,7 @@ def run_evaluation(
     run_faithfulness: bool = False,
     run_ood: bool = False,
     ood_n_samples: Optional[int] = None,
+    skip_inference: bool = False,
     device: str = "auto",
     seed: int = 42,
 ):
@@ -1175,6 +1176,7 @@ def run_evaluation(
         run_faithfulness: run Experiment 4 (three-level faithfulness test)
         run_ood: run Experiment 5 (WinoBias + StereoSet OOD evaluation)
         ood_n_samples: samples per OOD benchmark (None = full benchmark)
+        skip_inference: load predictions.json from output_dir instead of re-running BBQ inference
         device: device to use
         seed: must match the seed used during training to ensure the same 90/10 split
     """
@@ -1203,68 +1205,84 @@ def run_evaluation(
     model = PeftModel.from_pretrained(base_model, checkpoint)
     model.eval()
 
-    print(f"Loading BBQ eval data (10% split, seed={seed})...")
-    splits = create_splits(train_ratio=0.9, seed=seed)
-    eval_ds = splits["eval"]
-
-    if n_eval is not None:
-        eval_ds = eval_ds.select(range(min(n_eval, len(eval_ds))))
-
-    eval_data = [eval_ds[i] for i in range(len(eval_ds))]
-    print(f"Eval samples: {len(eval_data)} "
-          f"(ambig: {sum(1 for e in eval_data if e['context_condition'] == 'ambig')}, "
-          f"disambig: {sum(1 for e in eval_data if e['context_condition'] == 'disambig')})")
-
-    print("Running inference...")
-
-    prompt_texts = [
-        tokenizer.apply_chat_template(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": example["prompt"]},
-            ],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-        for example in eval_data
-    ]
-
-    generated_outputs = []
-    for i in tqdm(range(0, len(eval_data), batch_size), desc="Evaluating"):
-        batch_prompts = prompt_texts[i : i + batch_size]
-        inputs = tokenizer(
-            batch_prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        ).to(model.device)
-
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
+    if skip_inference:
+        predictions_file = output_path / "predictions.json"
+        if not predictions_file.exists():
+            raise FileNotFoundError(
+                f"--skip-inference requires {predictions_file} to exist. "
+                "Run without --skip-inference first to generate it."
             )
+        print(f"Loading existing predictions from {predictions_file}")
+        with open(predictions_file) as f:
+            predictions = json.load(f)
+        print(f"Loaded {len(predictions)} predictions.")
+    else:
+        print(f"Loading BBQ eval data (10% split, seed={seed})...")
+        splits = create_splits(train_ratio=0.9, seed=seed)
+        eval_ds = splits["eval"]
 
-        input_len = inputs["input_ids"].shape[1]
-        decoded = tokenizer.batch_decode(
-            outputs[:, input_len:], skip_special_tokens=True
-        )
-        generated_outputs.extend(decoded)
+        if n_eval is not None:
+            eval_ds = eval_ds.select(range(min(n_eval, len(eval_ds))))
 
-    predictions = [
-        {
-            "model_output": generated,
-            "answer_label": example["answer_label"],
-            "context_condition": example["context_condition"],
-            "category": example["category"],
-            "target_label": example.get("target_label"),
-            "unknown_label": example.get("unknown_label", -1),
-            "prompt": example["prompt"],
-        }
-        for example, generated in zip(eval_data, generated_outputs)
-    ]
+        eval_data = [eval_ds[i] for i in range(len(eval_ds))]
+        print(f"Eval samples: {len(eval_data)} "
+              f"(ambig: {sum(1 for e in eval_data if e['context_condition'] == 'ambig')}, "
+              f"disambig: {sum(1 for e in eval_data if e['context_condition'] == 'disambig')})")
+
+        print("Running inference...")
+
+        prompt_texts = [
+            tokenizer.apply_chat_template(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": example["prompt"]},
+                ],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for example in eval_data
+        ]
+
+        generated_outputs = []
+        for i in tqdm(range(0, len(eval_data), batch_size), desc="Evaluating"):
+            batch_prompts = prompt_texts[i : i + batch_size]
+            inputs = tokenizer(
+                batch_prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            ).to(model.device)
+
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
+
+            input_len = inputs["input_ids"].shape[1]
+            decoded = tokenizer.batch_decode(
+                outputs[:, input_len:], skip_special_tokens=True
+            )
+            generated_outputs.extend(decoded)
+
+        predictions = [
+            {
+                "model_output": generated,
+                "answer_label": example["answer_label"],
+                "context_condition": example["context_condition"],
+                "category": example["category"],
+                "target_label": example.get("target_label"),
+                "unknown_label": example.get("unknown_label", -1),
+                "prompt": example["prompt"],
+            }
+            for example, generated in zip(eval_data, generated_outputs)
+        ]
+
+        with open(output_path / "predictions.json", "w") as f:
+            json.dump(predictions, f, indent=2)
+        print(f"Predictions saved to {output_path / 'predictions.json'}")
 
     results = evaluate_all(
         predictions,
@@ -1276,19 +1294,16 @@ def run_evaluation(
         output_path=str(output_path / "metrics.json"),
     )
 
-    with open(output_path / "predictions.json", "w") as f:
-        json.dump(predictions, f, indent=2)
-    print(f"Predictions saved to {output_path / 'predictions.json'}")
-
-    print("\n" + "=" * 60)
-    print("SAMPLE OUTPUTS (first 5)")
-    print("=" * 60)
-    for pred in predictions[:5]:
-        print(f"\n--- [{pred['category']}] [{pred['context_condition']}] ---")
-        print(f"Prompt: {pred['prompt'][:200]}...")
-        print(f"Model output: {pred['model_output'][:300]}")
-        print(f"Correct answer: {pred['answer_label']}  Unknown option: {pred['unknown_label']}")
-        print()
+    if not skip_inference:
+        print("\n" + "=" * 60)
+        print("SAMPLE OUTPUTS (first 5)")
+        print("=" * 60)
+        for pred in predictions[:5]:
+            print(f"\n--- [{pred['category']}] [{pred['context_condition']}] ---")
+            print(f"Prompt: {pred['prompt'][:200]}...")
+            print(f"Model output: {pred['model_output'][:300]}")
+            print(f"Correct answer: {pred['answer_label']}  Unknown option: {pred['unknown_label']}")
+            print()
 
     return results, predictions
 
@@ -1315,6 +1330,9 @@ if __name__ == "__main__":
                         help="Run Experiment 5: WinoBias + StereoSet OOD evaluation")
     parser.add_argument("--ood-n-samples", type=int, default=None,
                         help="Samples per OOD benchmark (default: full benchmark)")
+    parser.add_argument("--skip-inference", action="store_true",
+                        help="Skip BBQ inference and load predictions.json from --output-dir. "
+                             "Use when re-running only --run-faithfulness / --run-ood.")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=42,
                         help="Must match the seed used during training (default: 42)")
@@ -1333,6 +1351,7 @@ if __name__ == "__main__":
         run_faithfulness=args.run_faithfulness,
         run_ood=args.run_ood,
         ood_n_samples=args.ood_n_samples,
+        skip_inference=args.skip_inference,
         device=args.device,
         seed=args.seed,
     )
