@@ -674,27 +674,55 @@ def evaluate_winobias(
             "ground_truth": ground_truth,
         }
 
-    # Load all four splits; skip any that fail gracefully
-    split_configs = [
-        ("type1_pro", True), ("type2_pro", True),
-        ("type1_anti", False), ("type2_anti", False),
+    # Load from GitHub raw files (uclanlp/winobias not on HuggingFace)
+    import urllib.request
+
+    _WB_BASE = (
+        "https://raw.githubusercontent.com/uclanlp/winobias/master/data/"
+    )
+    _WB_FILES = [
+        ("pro_stereotyped_type1.txt.test",  True),
+        ("pro_stereotyped_type2.txt.test",  True),
+        ("anti_stereotyped_type1.txt.test", False),
+        ("anti_stereotyped_type2.txt.test", False),
     ]
+
+    def _load_wb_file(filename: str, is_pro: bool) -> list:
+        """Fetch one WinoBias file from GitHub and parse each line."""
+        url = _WB_BASE + filename
+        try:
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                text = resp.read().decode("utf-8")
+        except Exception as e:
+            return []
+        examples = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # Strip bracket notation: "[1 The]" → "The"
+            tokens = re.findall(r"\[\d+\s+([^\]]+)\]", line)
+            if not tokens:
+                # Fallback: plain space-separated tokens
+                tokens = line.split()
+            parsed = _parse_wb(tokens, is_pro)
+            if parsed is not None:
+                examples.append(parsed)
+        return examples
+
     pro_examples, anti_examples = [], []
     any_loaded = False
-    for split_name, is_pro in split_configs:
-        try:
-            ds = load_dataset("uclanlp/winobias", split_name, split="train")
-            parsed = [_parse_wb(ex.get("tokens", []), is_pro) for ex in ds]
-            parsed = [p for p in parsed if p is not None]
-            (pro_examples if is_pro else anti_examples).extend(parsed)
+    for filename, is_pro in _WB_FILES:
+        examples = _load_wb_file(filename, is_pro)
+        if examples:
+            (pro_examples if is_pro else anti_examples).extend(examples)
             any_loaded = True
-        except Exception:
-            pass
 
     if not any_loaded:
         return {
-            "error": "Failed to load WinoBias dataset",
-            "note": "Dataset: uclanlp/winobias",
+            "error": "Failed to load WinoBias dataset from GitHub (uclanlp/winobias). "
+                     "Check network access.",
+            "note": "Source: https://github.com/uclanlp/winobias",
         }
 
     rng = random.Random(seed)
@@ -854,6 +882,11 @@ def evaluate_stereoset(
 
     for generated, (_, letter_map, bias_type) in zip(generated_texts, items):
         pred_answer = extract_answer(generated)
+        # Fallback: if no <answer> tag, look for standalone (a)/(b)/(c) anywhere
+        if pred_answer is None:
+            m = re.search(r"\(([abc])\)", generated, re.IGNORECASE)
+            if m:
+                pred_answer = f"({m.group(1).lower()})"
         pred_letter = pred_answer.strip("()") if pred_answer else ""
 
         chosen_label = None
