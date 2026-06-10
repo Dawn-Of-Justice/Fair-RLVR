@@ -1,0 +1,10 @@
+{
+  "faithfulness_score": -0.010000000000000009,
+  "sensitivity_permuted": -0.010000000000000009,
+  "sensitivity_null": 0.21999999999999997,
+  "p_correct_real_cot": 0.97,
+  "p_correct_permuted_cot": 0.98,
+  "p_correct_null_cot": 0.75,
+  "n_samples": 100,
+  "interpretation": "LOW_NULL_ACCURACY: Model accuracy drops substantially without reasoning content. CoT plays a meaningful causal role in the decision. Causal claims are supported."
+}
