@@ -158,15 +158,88 @@
     "abstention_rate_ambiguous": 0.7802114803625377,
     "abstention_rate_disambiguated": 0.11329305135951662
   },
-  "faithfulness": {
-    "faithfulness_score": -0.010000000000000009,
-    "sensitivity_permuted": -0.010000000000000009,
-    "sensitivity_null": 0.21999999999999997,
-    "p_correct_real_cot": 0.97,
-    "p_correct_permuted_cot": 0.98,
-    "p_correct_null_cot": 0.75,
-    "n_samples": 100,
-    "interpretation": "LOW_NULL_ACCURACY: Model accuracy drops substantially without reasoning content. CoT plays a meaningful causal role in the decision. Causal claims are supported."
+  "bootstrap_ci": {
+    "n": 2648,
+    "n_boot": 10000,
+    "ci_level": 0.95,
+    "seed": 42,
+    "accuracy_ambiguous": {
+      "point": 0.9811178247734139,
+      "ci_low": 0.973424449506454,
+      "ci_high": 0.98796992481203,
+      "std": 0.0037007848042645724
+    },
+    "accuracy_disambiguated": {
+      "point": 0.9720543806646526,
+      "ci_low": 0.9627414812666216,
+      "ci_high": 0.9804232048990856,
+      "std": 0.004489371665413494
+    },
+    "bias_score_bbq_ambig": {
+      "point": -0.016805784823662528,
+      "ci_low": -0.022567648764949665,
+      "ci_high": -0.011148843908354671,
+      "std": 0.0029148990491715816
+    },
+    "bias_score_bbq_disambig": {
+      "point": 0.03407155025553665,
+      "ci_low": -0.022596478929804965,
+      "ci_high": 0.09106105689756311,
+      "std": 0.028790006905054677
+    },
+    "abstention_rate_disambiguated": {
+      "point": 0.11329305135951662,
+      "ci_low": 0.09667667874658573,
+      "ci_high": 0.13066475416307696,
+      "std": 0.008643074998275126
+    },
+    "consistency_check": "OK: bootstrap point estimates match canonical metric functions"
+  },
+  "ood": {
+    "winobias": {
+      "winobias_bias_score": 0.21440751236850963,
+      "accuracy_pro_stereotypical": 0.8073394495412844,
+      "accuracy_anti_stereotypical": 0.5929319371727748,
+      "n_pro": 763,
+      "n_anti": 764,
+      "note": "bias_score = acc_pro - acc_anti. 0 = unbiased; >0 = model relies on gender stereotypes for coreference."
+    },
+    "stereoset": {
+      "stereotype_score": 0.6998956158663883,
+      "language_model_score": 0.958,
+      "icat_score": 0.5750000000000001,
+      "stereotype_chosen": 1341,
+      "anti_stereotype_chosen": 575,
+      "unrelated_chosen": 84,
+      "total": 2000,
+      "per_bias_type": {
+        "race": {
+          "stereotype_score": 0.6595022624434389
+        },
+        "profession": {
+          "stereotype_score": 0.7296551724137931
+        },
+        "gender": {
+          "stereotype_score": 0.7872340425531915
+        },
+        "religion": {
+          "stereotype_score": 0.6111111111111112
+        }
+      },
+      "label_order": "assumed default ['anti-stereotype', 'stereotype', 'unrelated'] (ClassLabel not introspectable)",
+      "note": "SS=0.5 -> unbiased; SS>0.5 -> stereotype-aligned. LMS measures coherent completion preference. ICAT penalizes both high and low SS relative to 0.5."
+    },
+    "intersectional_bbq": {
+      "n_samples": 2000,
+      "accuracy_ambiguous": 0.961839530332681,
+      "accuracy_disambiguated": 0.9120654396728016,
+      "bias_score_bbq_ambig": -0.03659223118784015,
+      "bias_score_bbq_disambig": -0.02862985685071573,
+      "categories": [
+        "Race_x_SES",
+        "Race_x_gender"
+      ]
+    }
   },
   "summary": {
     "bbq_accuracy_ambig": 0.9811178247734139,

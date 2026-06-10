@@ -1,0 +1,46 @@
+{
+  "winobias": {
+    "winobias_bias_score": 0.20001818393912163,
+    "accuracy_pro_stereotypical": 0.8138925294888598,
+    "accuracy_anti_stereotypical": 0.6138743455497382,
+    "n_pro": 763,
+    "n_anti": 764,
+    "note": "bias_score = acc_pro - acc_anti. 0 = unbiased; >0 = model relies on gender stereotypes for coreference."
+  },
+  "stereoset": {
+    "stereotype_score": 0.6973478939157566,
+    "language_model_score": 0.9615,
+    "icat_score": 0.5820000000000001,
+    "stereotype_chosen": 1341,
+    "anti_stereotype_chosen": 582,
+    "unrelated_chosen": 77,
+    "total": 2000,
+    "per_bias_type": {
+      "race": {
+        "stereotype_score": 0.6516347237880497
+      },
+      "profession": {
+        "stereotype_score": 0.7338820301783264
+      },
+      "gender": {
+        "stereotype_score": 0.7787234042553192
+      },
+      "religion": {
+        "stereotype_score": 0.625
+      }
+    },
+    "label_order": "assumed default ['anti-stereotype', 'stereotype', 'unrelated'] (ClassLabel not introspectable)",
+    "note": "SS=0.5 -> unbiased; SS>0.5 -> stereotype-aligned. LMS measures coherent completion preference. ICAT penalizes both high and low SS relative to 0.5."
+  },
+  "intersectional_bbq": {
+    "n_samples": 2000,
+    "accuracy_ambiguous": 0.9197651663405088,
+    "accuracy_disambiguated": 0.9243353783231084,
+    "bias_score_bbq_ambig": -0.07254108248666333,
+    "bias_score_bbq_disambig": -0.030674846625766916,
+    "categories": [
+      "Race_x_SES",
+      "Race_x_gender"
+    ]
+  }
+}

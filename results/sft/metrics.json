@@ -113,10 +113,133 @@
       }
     }
   },
+  "group_fairness": {
+    "dpd": 0.0720486111111111,
+    "eod": 0.19444444444444445,
+    "dir": 0.9068462401795735,
+    "rb": 0.26435045317220546,
+    "per_category_target_rate": {
+      "Age": 0.26704545454545453,
+      "Disability_status": 0.2265625,
+      "Gender_identity": 0.25,
+      "Nationality": 0.28088235294117647,
+      "Physical_appearance": 0.2986111111111111,
+      "Race_ethnicity": 0.25,
+      "Religion": 0.26666666666666666,
+      "SES": 0.25,
+      "Sexual_orientation": 0.25
+    },
+    "per_category_eod_rate": {
+      "Age": 0.09090909090909091,
+      "Disability_status": 0.0,
+      "Gender_identity": 0.0,
+      "Nationality": 0.011764705882352941,
+      "Physical_appearance": 0.19444444444444445,
+      "Race_ethnicity": 0.011111111111111112,
+      "Religion": 0.05,
+      "SES": 0.0,
+      "Sexual_orientation": 0.0
+    },
+    "per_category_non_target_rate": {
+      "Age": 0.7329545454545454,
+      "Disability_status": 0.7734375,
+      "Gender_identity": 0.75,
+      "Nationality": 0.7191176470588235,
+      "Physical_appearance": 0.7013888888888888,
+      "Race_ethnicity": 0.75,
+      "Religion": 0.7333333333333333,
+      "SES": 0.75,
+      "Sexual_orientation": 0.75
+    },
+    "n_used": 2648
+  },
   "abstention": {
     "abstention_rate_overall": 0.29003021148036257,
     "abstention_rate_ambiguous": 0.5770392749244713,
     "abstention_rate_disambiguated": 0.0030211480362537764
+  },
+  "bootstrap_ci": {
+    "n": 2648,
+    "n_boot": 10000,
+    "ci_level": 0.95,
+    "seed": 42,
+    "accuracy_ambiguous": {
+      "point": 0.9780966767371602,
+      "ci_low": 0.9698746350454889,
+      "ci_high": 0.9856060606060606,
+      "std": 0.00400533545320433
+    },
+    "accuracy_disambiguated": {
+      "point": 0.972809667673716,
+      "ci_low": 0.9638279373212134,
+      "ci_high": 0.9812940320198954,
+      "std": 0.0044890805220385065
+    },
+    "bias_score_bbq_ambig": {
+      "point": -0.020182347863616706,
+      "ci_low": -0.026914158881722314,
+      "ci_high": -0.013639838312763001,
+      "std": 0.0033786626336073256
+    },
+    "bias_score_bbq_disambig": {
+      "point": 0.027272727272727337,
+      "ci_low": -0.026401640139751537,
+      "ci_high": 0.0811638591117918,
+      "std": 0.02736381826427224
+    },
+    "abstention_rate_disambiguated": {
+      "point": 0.0030211480362537764,
+      "ci_low": 0.0007369196757553427,
+      "ci_high": 0.006172958672958671,
+      "std": 0.001506772354396317
+    },
+    "consistency_check": "OK: bootstrap point estimates match canonical metric functions"
+  },
+  "ood": {
+    "winobias": {
+      "winobias_bias_score": 0.2104773798659192,
+      "accuracy_pro_stereotypical": 0.8047182175622543,
+      "accuracy_anti_stereotypical": 0.5942408376963351,
+      "n_pro": 763,
+      "n_anti": 764,
+      "note": "bias_score = acc_pro - acc_anti. 0 = unbiased; >0 = model relies on gender stereotypes for coreference."
+    },
+    "stereoset": {
+      "stereotype_score": 0.7056562328390994,
+      "language_model_score": 0.9105,
+      "icat_score": 0.536,
+      "stereotype_chosen": 1285,
+      "anti_stereotype_chosen": 536,
+      "unrelated_chosen": 179,
+      "total": 2000,
+      "per_bias_type": {
+        "race": {
+          "stereotype_score": 0.6642599277978339
+        },
+        "profession": {
+          "stereotype_score": 0.7307692307692307
+        },
+        "gender": {
+          "stereotype_score": 0.8090909090909091
+        },
+        "religion": {
+          "stereotype_score": 0.6176470588235294
+        }
+      },
+      "label_order": "assumed default ['anti-stereotype', 'stereotype', 'unrelated'] (ClassLabel not introspectable)",
+      "note": "SS=0.5 -> unbiased; SS>0.5 -> stereotype-aligned. LMS measures coherent completion preference. ICAT penalizes both high and low SS relative to 0.5."
+    },
+    "intersectional_bbq": {
+      "n_samples": 2000,
+      "accuracy_ambiguous": 0.9540117416829745,
+      "accuracy_disambiguated": 0.9038854805725971,
+      "bias_score_bbq_ambig": -0.04311227206144045,
+      "bias_score_bbq_disambig": -0.03991811668372569,
+      "categories": [
+        "Race_x_gender",
+        "Race_x_SES"
+      ]
+    }
   },
   "summary": {
     "bbq_accuracy_ambig": 0.9780966767371602,
@@ -125,6 +248,10 @@
     "bias_score_bbq_ambig": -0.020182347863616706,
     "bias_score_bbq_disambig": 0.027272727272727337,
     "bias_score_simplified": 0.7230769230769231,
+    "dpd": 0.0720486111111111,
+    "eod": 0.19444444444444445,
+    "dir": 0.9068462401795735,
+    "rb": 0.26435045317220546,
     "abstention_overall": 0.29003021148036257
   }
 }
