@@ -347,24 +347,26 @@ To test whether debiasing behaviour transfers beyond BBQ, we evaluate all traine
 \begin{table}[htbp]
 \caption{Out-of-Distribution Generalization Results}
 \begin{center}
-\begin{tabular}{lccccccc}
+{\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lcccccc}
 \toprule
- & \multicolumn{2}{c}{\textbf{WinoBias}} & \multicolumn{3}{c}{\textbf{StereoSet}} & \multicolumn{2}{c}{\textbf{Int.\ BBQ}} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-6}\cmidrule(lr){7-8}
-\textbf{Model} & \textbf{Bias}$\downarrow$ & \textbf{Acc} & \textbf{SS}$\to$\!\!0.5 & \textbf{LMS}$\uparrow$ & \textbf{ICAT}$\uparrow$ & \textbf{Amb.}$\uparrow$ & \textbf{Dis.}$\uparrow$ \\
+ & \textbf{WB} & \multicolumn{3}{c}{\textbf{StereoSet}} & \multicolumn{2}{c}{\textbf{Int.\ BBQ}} \\
+\cmidrule(lr){2-2}\cmidrule(lr){3-5}\cmidrule(lr){6-7}
+\textbf{Model} & \textbf{Bias}$\downarrow$ & \textbf{SS}$\to$0.5 & \textbf{LMS}$\uparrow$ & \textbf{ICAT}$\uparrow$ & \textbf{Amb.}$\uparrow$ & \textbf{Dis.}$\uparrow$ \\
 \midrule
-SFT                & 0.210 & 0.699 & 0.706 & 0.911 & 0.536 & 0.954 & 0.904 \\
-GRPO ($\lambda=0$) & \textbf{0.200} & \textbf{0.714} & \textbf{0.697} & \textbf{0.962} & \textbf{0.582} & 0.920 & \textbf{0.924} \\
-Fair-RLVR          & 0.214 & 0.700 & 0.700 & 0.958 & 0.575 & \textbf{0.962} & 0.912 \\
+SFT                & 0.210 & 0.706 & 0.911 & 0.536 & 0.954 & 0.904 \\
+GRPO ($\lambda=0$) & \textbf{0.200} & \textbf{0.697} & \textbf{0.962} & \textbf{0.582} & 0.920 & \textbf{0.924} \\
+Fair-RLVR          & 0.214 & 0.700 & 0.958 & 0.575 & \textbf{0.962} & 0.912 \\
 \bottomrule
 \end{tabular}
-\label{tab:ood}
+}
 \end{center}
+\noindent\footnotesize WB\,=\,WinoBias; Amb./Dis.\,=\,ambiguous/disambiguated accuracy (Int.\ BBQ).
+\label{tab:ood}
 \end{table}
 
-\noindent Amb./Dis.\,=\,ambiguous/disambiguated accuracy (Int.\ BBQ).
-
-No single trained model dominates across all OOD benchmarks. On WinoBias, all models show moderate gender-coreference bias (0.20--0.21); GRPO achieves the lowest score (0.200), and the small spread confirms that residual WinoBias bias reflects pre-training priors shared across all conditions rather than anything amplified by fairness training. On StereoSet, GRPO achieves the best LMS (0.962) and ICAT (0.582), indicating that GRPO-trained models maintain stronger language coherence than SFT; Fair-RLVR scores slightly lower (LMS 0.958, ICAT 0.575), a modest trade-off for its stronger BBQ fairness gains. On Intersectional BBQ, Fair-RLVR achieves the highest ambiguous-context accuracy (96.2\%), suggesting the BBQ-based fairness reward generalises to intersectional combinations of social dimensions not seen during training. The key takeaway is that Fair-RLVR does not degrade OOD behaviour relative to the fairness-unaware baseline (SFT), even if GRPO's format training alone is a competitive OOD baseline, and it is the only model that simultaneously achieves low BBQ bias (Table~\ref{tab:main}) and strong intersectional fairness.
+No single trained model dominates across all OOD benchmarks. On WinoBias, all models show moderate gender-coreference bias (0.20--0.21); GRPO achieves the lowest score (0.200), confirming residual bias reflects pre-training priors rather than anything amplified by fairness training. On StereoSet, GRPO achieves the best LMS (0.962) and ICAT (0.582), indicating stronger language coherence; Fair-RLVR scores slightly lower (ICAT 0.575), a modest trade-off for its stronger BBQ fairness gains. On Intersectional BBQ, Fair-RLVR achieves the highest ambiguous-context accuracy (96.2\%), suggesting the fairness reward generalises to unseen intersectional combinations. Fair-RLVR is the only model that simultaneously achieves low BBQ bias (Table~\ref{tab:main}) and strong intersectional fairness.
 
 %% ============================================================
 \section{Limitations}
