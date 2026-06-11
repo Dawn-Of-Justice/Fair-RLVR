@@ -42,9 +42,7 @@ reinforcement learning, fairness, bias mitigation, large language models, verifi
 \section{Introduction}
 %% ============================================================
 
-Recent breakthroughs in reinforcement learning via Verifiable Reward have demonstrated that language models can develop sophisticated reasoning capabilities without explicit supervision. DeepSeek-R1 \cite{deepseekr1} showed that by providing only a binary correctness reward, a model can spontaneously develop chain-of-thought (CoT) reasoning strategies such as self-verification and backtracking. This approach, known as Reinforcement Learning from Verifiable Rewards (RLVR), has since been extended to medical reasoning \cite{medrlvr} and open-ended tasks \cite{vmrrlvr}, confirming that verifiable rewards can drive emergent reasoning across domains.
-
-However, all existing RLVR work rewards models exclusively for \textit{correctness} in objective tasks: math answers, code compilation, medical diagnoses. Meanwhile, bias mitigation in large language models (LLMs) remains dominated by Reinforcement Learning from Human Feedback (RLHF), which suffers from three well-documented limitations. First, human preference signals are noisy and inconsistent, leading to ``alignment fragility'' where models learn to mimic a fair persona rather than internalize fairness principles \cite{rlhfbias}. Second, RLHF has been shown to amplify sycophantic behavior at scale, where models affirm user beliefs regardless of their validity \cite{rlhfsycophancy}. Third, annotation of fairness-sensitive outputs is expensive and does not scale to the diversity of social contexts and languages required for global deployment \cite{ascl}.
+DeepSeek-R1 \cite{deepseekr1} showed that binary correctness rewards cause models to spontaneously develop chain-of-thought (CoT) reasoning. This paradigm---Reinforcement Learning from Verifiable Rewards (RLVR)---has been extended to medicine \cite{medrlvr} and open-ended tasks \cite{vmrrlvr}. All existing RLVR work rewards correctness in objective tasks. Meanwhile, bias mitigation remains dominated by RLHF, whose annotations are inconsistent \cite{rlhfbias}, amplify sycophancy \cite{rlhfsycophancy}, and do not scale globally \cite{ascl}.
 
 A critical but underexplored observation motivates this work: \textbf{structured bias benchmarks can provide verifiable ground truth for specific, operationalized fairness tasks}. The Bias Benchmark for Question Answering (BBQ) \cite{bbq} provides 58,492 questions across nine social dimensions where the correct answer in ambiguous contexts is always ``Unknown''; any stereotype-aligned answer is objectively wrong under this operationalization. While fairness as a general concept does not have a single ground truth, BBQ's construction makes stereotype avoidance directly verifiable, and therefore amenable to RLVR.
 
@@ -65,15 +63,15 @@ Our contributions are as follows:
 
 \subsection{Reinforcement Learning from Verifiable Rewards}
 
-RLVR was introduced through DeepSeek-R1 \cite{deepseekr1}, which demonstrated that pure RL with binary correctness rewards causes models to autonomously develop reasoning strategies. R1-Zero improved AIME 2024 performance from 15.6\% to 71\% through RL alone. The underlying optimization algorithm, Group Relative Policy Optimization (GRPO) \cite{deepseekmath}, eliminates the need for a separate critic model by estimating baselines from grouped sampled outputs, reducing VRAM requirements by approximately 50\% compared to PPO. DAPO \cite{dapo} further stabilized GRPO training through asymmetric clipping (``Clip-Higher'') and dynamic sampling strategies that prevent entropy collapse. Med-RLVR \cite{medrlvr} extended RLVR to the medical domain, showing that a 3B-parameter model trained on 1,000 medical exam questions spontaneously developed clinical reasoning patterns such as differential diagnosis and symptom mapping. VMR-RLVR \cite{vmrrlvr} extended the framework to open-ended tasks by reformulating preference data into verifiable multiple-choice formats.
+GRPO \cite{deepseekmath} eliminates the separate critic model required by PPO \cite{ppo} by estimating baselines from grouped samples. DAPO \cite{dapo} further stabilized training via asymmetric clipping. Med-RLVR \cite{medrlvr} applied RLVR to medicine; VMR-RLVR \cite{vmrrlvr} extended it to open-ended tasks via verifiable MC reformulation.
 
 \subsection{Bias Benchmarks and Fairness Evaluation}
 
-Stereotype bias in NLP was first systematically studied by Bolukbasi et al.\ \cite{bolukbasi2016}, who showed that word embeddings encode occupational gender stereotypes that propagate to downstream tasks. Blodgett et al.\ \cite{blodgett2020} surveyed the NLP bias literature and identified operationalization inconsistency as a core obstacle to progress. The Bias Benchmark for Question Answering (BBQ) \cite{bbq} addressed this by providing 58,492 hand-curated trinary-choice questions spanning nine social dimensions including age, gender identity, race/ethnicity, and religion. BBQ uses a factorial design comparing model behavior in ``ambiguous'' contexts (where ``Unknown'' is the only correct answer) and ``disambiguated'' contexts (where explicit evidence determines the answer). Prior work found that models are 3.4 percentage points more accurate when the correct answer aligns with social stereotypes, demonstrating that internal priors override evidence. WinoBias \cite{winobias} evaluates gender-coreference stereotypes via syntactically unambiguous sentences; StereoSet \cite{stereoset} measures stereotype associations in sentence completion with a joint ICAT metric that penalises models that reduce stereotyping by sacrificing language quality; CrowS-Pairs \cite{crowspairs} covers 11 bias categories in masked language models. These benchmarks test different forms of implicit bias and serve as OOD validators in our experiments.
+Bolukbasi et al.\ \cite{bolukbasi2016} showed word embeddings encode occupational stereotypes; Blodgett et al.\ \cite{blodgett2020} identified operationalization inconsistency as a core obstacle in NLP bias research. BBQ \cite{bbq} addresses this with 58,492 trinary-choice questions across nine social dimensions, using ambiguous contexts (correct answer always ``Unknown'') and disambiguated contexts (answer determined by evidence). Prior work found models are 3.4 pp more accurate when the answer aligns with stereotypes. WinoBias \cite{winobias}, StereoSet \cite{stereoset}, and CrowS-Pairs \cite{crowspairs} test complementary bias forms and serve as OOD validators.
 
 \subsection{Limitations of Preference-Based Alignment}
 
-Xiao et al. \cite{rlhfbias} proved that KL-divergence regularization in standard RLHF causes ``preference collapse,'' suppressing minority viewpoints. Shapira et al. \cite{rlhfsycophancy} showed RLHF amplifies sycophantic behavior at scale. Ravulu et al. \cite{szalouk_rlhf_bias} demonstrated that even careful reward modeling constraints cannot fully overcome the subjectivity of human feedback. Safety-focused RL approaches such as RealSafe-R1 \cite{realsafer1} and ASCL \cite{ascl} rely on human-curated reasoning trajectories, remaining expensive and annotator-dependent. Standard RLHF uses Proximal Policy Optimization (PPO) \cite{ppo}, which requires a separate critic model; GRPO \cite{deepseekmath} eliminates this overhead, making it more practical for fairness-specific training.
+Xiao et al. \cite{rlhfbias} proved KL-divergence regularization causes ``preference collapse,'' suppressing minority viewpoints. Shapira et al. \cite{rlhfsycophancy} showed RLHF amplifies sycophancy at scale. Safety-focused approaches such as RealSafe-R1 \cite{realsafer1} and ASCL \cite{ascl} rely on human-curated reasoning trajectories, remaining annotator-dependent; GRPO \cite{deepseekmath} eliminates the separate critic required by PPO \cite{ppo}, making it more practical for fairness-specific training.
 
 \subsection{Fairness and Reasoning}
 
@@ -139,18 +137,15 @@ A_i = \frac{R_i - \mu(R)}{\sigma(R)}
 \textbf{Component} & \textbf{Specification} \\
 \midrule
 Base Model & Qwen2.5-3B-Instruct \cite{qwen25} \\
-Quantization & None (bfloat16) \\
-Adaptation & LoRA \cite{lora} ($r=16$, $\alpha=32$) \\
+Adaptation & LoRA \cite{lora} ($r=16$, $\alpha=32$, bfloat16) \\
 Hardware & 1$\times$ NVIDIA H100 (80 GB) \\
 Learning Rate & $1 \times 10^{-5}$ (cosine schedule) \\
 Group Size ($G$) & 4 \\
 Batch Size & 32 prompts ($\times G = 128$ completions) \\
-Max New Tokens & 256 \\
 KL Coefficient & 0.01 \\
 Clip Ratios & $\epsilon_{\text{low}}=0.20$, $\epsilon_{\text{high}}=0.28$ \\
 Training Samples & 52,643 (90\% of BBQ, seed=42) \\
 Training Steps & 1,000 (all runs) \\
-Seed & 42 \\
 \bottomrule
 \end{tabular}
 \label{tab:config}
@@ -200,8 +195,7 @@ GRPO ($\lambda=0$) & 69.5\% & 94.6\% & 0.697 & 21.3\% & 35.2\% \\
 
 \noindent \textit{Bias}$\downarrow$ = stereotype-consistent errors / total errors (0.5 = unbiased). \textit{ASE}$\downarrow$ = $(1 - \text{BBQ-A}) \times \text{Bias}$. Bootstrap 95\% CIs for Fair-RLVR (10,000 resamples, $n=2{,}648$): BBQ-A [84.8\%, 88.5\%]; BBQ-D [91.2\%, 94.1\%].
 
-Three findings stand out. First, Fair-RLVR achieves the lowest stereotype error ratio (0.634) of all trained models, outperforming both GRPO (0.697) and SFT (0.723), while simultaneously improving ambiguous-context accuracy by +20.6 pp over zero-shot. The ASE column shows Fair-RLVR at 8.4\% versus GRPO at 21.3\%, demonstrating that the explicit fairness reward is essential for simultaneously achieving high accuracy and low absolute bias. Second, SFT achieves 97.8\% accuracy but its stereotype error rate (0.723) is slightly \textit{worse} than zero-shot (0.717), confirming that label memorization does not constitute fairness learning. Third, Fair-RLVR's elevated abstention rate (41.7\% overall; 68.9\% on ambiguous, 14.4\% on disambiguated) reflects the learned strategy of defaulting to ``Unknown'' in ambiguous contexts. The 14.4\% disambiguated abstention represents partial over-abstention where the model withholds commitment on questions with determinable answers; SFT's corresponding rate is only 0.3\%. Official BBQ bias scores ($-0.048$ zero-shot, $-0.048$ Fair-RLVR) are near zero because this metric scales inversely with accuracy; the stereotype error rate and ASE are more informative for high-accuracy models.
-
+Three findings stand out. First, Fair-RLVR achieves the lowest stereotype error ratio (0.634) of all trained models, outperforming both GRPO (0.697) and SFT (0.723), while simultaneously improving ambiguous-context accuracy by +20.6 pp over zero-shot. The ASE column shows Fair-RLVR at 8.4\% versus GRPO at 21.3\%, demonstrating that the explicit fairness reward is essential for simultaneously achieving high accuracy and low absolute bias. Second, SFT achieves 97.8\% accuracy but its stereotype error rate (0.723) is slightly \textit{worse} than zero-shot (0.717), confirming that label memorization does not constitute fairness learning. Third, Fair-RLVR's elevated abstention rate (41.7\% overall; 68.9\% on ambiguous, 14.4\% on disambiguated) reflects the learned strategy of defaulting to ``Unknown'' in ambiguous contexts. The 14.4\% disambiguated abstention represents partial over-abstention where the model withholds commitment on questions with determinable answers; SFT's corresponding rate is only 0.3\%. 
 \subsection{Group Fairness Metrics}
 
 Table~\ref{tab:groupfair} reports group fairness metrics for all trained models, following Ravulu et al.\ \cite{szalouk_rlhf_bias}. These metrics quantify whether model error rates are equitable across demographic groups. Zero-shot group fairness metrics are not included because the zero-shot evaluation predates the group-fairness module; adding them is straightforward but was not part of the experimental run. The trained-model comparison is nonetheless informative because it separates the contributions of format training (GRPO $\lambda=0$), SFT, and the full fairness reward.
@@ -378,11 +372,9 @@ No single trained model dominates across all OOD benchmarks. On WinoBias, all mo
 
 Several limitations should be noted.
 
-\noindent\textbf{OOD scope.} While OOD evaluations on WinoBias, StereoSet, and intersectional BBQ confirm that debiasing behaviour transfers beyond the training distribution (Table~\ref{tab:ood}), these benchmarks share some structural similarities with BBQ (MC format, English language). Evaluation on free-form generation benchmarks (e.g., CrowS-Pairs \cite{crowspairs}, RealToxicityPrompts) and non-English languages remains future work.
+\noindent\textbf{OOD and benchmark scope.} OOD evaluations on WinoBias, StereoSet, and intersectional BBQ (Table~\ref{tab:ood}) confirm transfer beyond training, but these benchmarks share structural similarities with BBQ (MC format, English). Free-form generation benchmarks (e.g., CrowS-Pairs \cite{crowspairs}) and global cultural contexts (BharatBBQ) remain untested.
 
-\noindent\textbf{Benchmark scope.} BBQ is Western-centric, focused on U.S.\ English social categories; generalization to global cultural contexts (e.g., BharatBBQ) remains untested.
-
-\noindent\textbf{Model scale.} Our experiments are limited to a single model size (3B parameters) due to hardware constraints. Prior RLVR work suggests that larger models (7B+) converge faster and may benefit more from verifiable reward signals due to their stronger priors for structured reasoning. However, larger models also exhibit stronger pre-training biases, and it is unclear whether the same fairness reward magnitude ($\lambda=0.5$) would remain optimal. Investigation at 7B and above, particularly with models exhibiting higher baseline BBQ accuracy, is an important open question.
+\noindent\textbf{Model scale.} Experiments use a single model size (3B parameters). Larger models (7B+) may benefit more from verifiable reward signals but also exhibit stronger pre-training biases, and whether $\lambda=0.5$ remains optimal at scale is an open question.
 
 \noindent\textbf{Single seed.} All experiments use a fixed random seed (42). RL training variance means results from a single run cannot rule out that observed differences fall within the natural fluctuation of the optimization process, particularly for the small margins between conditions (e.g., GRPO bias ratio 0.697 vs.\ Fair-RLVR 0.634). Reporting multiple seeds would strengthen causal claims.
 
@@ -390,7 +382,6 @@ Several limitations should be noted.
 
 \noindent\textbf{Uneven per-category improvement.} Fair-RLVR increases the stereotype error ratio in SES, Nationality, and Race/Ethnicity relative to zero-shot, though ASE decreases across all categories (see Section~IV-D analysis).
 
-\noindent\textbf{Alignment tax.} Fair-RLVR imposes a small alignment tax ($-1.4$ pp MMLU, $-1.3$ pp GSM8K), confirming that fairness training comes at a modest cost to general reasoning.
 
 %% ============================================================
 \section{Conclusion}
@@ -398,7 +389,7 @@ Several limitations should be noted.
 
 This paper introduces Fair-RLVR, a framework that applies Reinforcement Learning from Verifiable Rewards to fairness alignment in language models. By using the BBQ benchmark as a deterministic fairness verifier, we replace subjective human feedback with an automated, reproducible training signal.
 
-Fair-RLVR ($\lambda=0.5$) improves ambiguous-context accuracy from 66.1\% to 86.7\% and reduces the overall Absolute Stereotype Error from 24.3\% to 8.4\%. SFT reaches higher raw accuracy (97.8\%) but its bias score worsens (0.723 vs.\ 0.717 zero-shot), isolating the fairness reward---not label exposure---as the debiasing mechanism. GRPO ($\lambda=0$) reaches a bias ratio of 0.697 with an ASE of 21.3\%, confirming that both the fairness reward and the accuracy improvement are jointly necessary. Per-category results are mixed: Fair-RLVR reduces bias in Physical Appearance, Religion, Age, and Sexual Orientation while the SES and Nationality error ratios worsen; however, ASE---which accounts for the overall accuracy improvement---decreases across all categories. Causal faithfulness analysis ($\Delta_{\text{null}} = 0.22$) confirms the chain-of-thought plays a genuine computational role. OOD evaluation on WinoBias, StereoSet, and intersectional BBQ shows no single model dominating all benchmarks; GRPO is the strongest on WinoBias and StereoSet language quality, while Fair-RLVR achieves the highest intersectional BBQ ambiguous accuracy (96.2\%), indicating that the fairness reward generalises to unseen demographic combinations not present in training.
+Fair-RLVR ($\lambda=0.5$) improves ambiguous-context accuracy from 66.1\% to 86.7\% and reduces ASE from 24.3\% to 8.4\%, while SFT's bias score worsens (0.723 vs.\ 0.717 zero-shot), isolating the fairness reward as the debiasing mechanism. Causal faithfulness analysis ($\Delta_{\text{null}} = 0.22$) confirms the chain-of-thought plays a genuine computational role. OOD evaluation confirms transfer: GRPO leads on WinoBias and StereoSet language quality, while Fair-RLVR achieves the highest intersectional BBQ ambiguous accuracy (96.2\%).
 
 The central insight of this work is that structured bias benchmarks can provide the verifiable labels needed to apply RLVR to fairness-adjacent tasks and that the same training paradigm that produced emergent mathematical reasoning can produce emergent stereotype-avoidance behaviour within that benchmark operationalization. This finding opens a path toward scalable, automated bias reduction that does not require human annotators, provided an appropriate verifiable benchmark exists for the target bias type. The modest alignment tax ($-1.4$ pp MMLU, $-1.3$ pp GSM8K) is outweighed by the fairness gains and is consistent with prior RLVR literature.
 
