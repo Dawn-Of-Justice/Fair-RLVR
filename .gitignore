@@ -226,3 +226,12 @@ results/sft/adapter/*.safetensors
 results/sft/adapter/*.bin
 results/fair_rlvr/final_adapter/tokenizer.json
 results/sft/adapter/tokenizer.json
+
+# ignore run logs and wandb data
+results/*/logs/
+results/*/wandb/
+results/*/figures/
+results/*/dynamics/
+results/*/final_adapter/training_args.bin
+wandb/
+bash.exe.stackdump
