@@ -42,7 +42,7 @@ reinforcement learning, fairness, bias mitigation, large language models, verifi
 \section{Introduction}
 %% ============================================================
 
-DeepSeek-R1 \cite{deepseekr1} showed that binary correctness rewards cause models to spontaneously develop chain-of-thought (CoT) reasoning. This paradigm---Reinforcement Learning from Verifiable Rewards (RLVR)---has been extended to medicine \cite{medrlvr} and open-ended tasks \cite{vmrrlvr}. All existing RLVR work rewards correctness in objective tasks. Meanwhile, bias mitigation remains dominated by Reinforcement Learning from Human Feedback (RLHF), whose annotations are inconsistent \cite{rlhfbias}, amplify sycophancy \cite{rlhfsycophancy}, and do not scale globally \cite{ascl}.
+DeepSeek-R1 \cite{deepseekr1} showed that binary correctness rewards cause models to spontaneously develop chain-of-thought (CoT) reasoning. This paradigm---Reinforcement Learning from Verifiable Rewards (RLVR)---has been extended to medicine \cite{medrlvr} and open-ended tasks \cite{vmrrlvr}, but always for objective correctness. Meanwhile, bias mitigation remains dominated by Reinforcement Learning from Human Feedback (RLHF), whose annotations are inconsistent \cite{rlhfbias}, amplify sycophancy \cite{rlhfsycophancy}, and do not scale globally \cite{ascl}.
 
 We introduce \textbf{Fair-RLVR}, which applies RLVR to fairness alignment using the Bias Benchmark for Question Answering (BBQ) \cite{bbq} as a verifiable reward signal: in ambiguous contexts the correct answer is always ``Unknown,'' making any stereotype-aligned answer objectively wrong---directly amenable to verifiable-reward policy gradient training \cite{deepseekmath}.
 
@@ -69,7 +69,7 @@ Bolukbasi et al.\ \cite{bolukbasi2016} showed word embeddings encode occupationa
 
 \subsection{Limitations of Preference-Based Alignment}
 
-Xiao et al. \cite{rlhfbias} proved KL-divergence regularization causes ``preference collapse,'' suppressing minority viewpoints. Shapira et al. \cite{rlhfsycophancy} showed RLHF amplifies sycophancy at scale. Safety-focused approaches such as RealSafe-R1 \cite{realsafer1} and ASCL \cite{ascl} rely on human-curated reasoning trajectories, remaining annotator-dependent; Group-relative policy optimization \cite{deepseekmath} eliminates the separate critic required by PPO \cite{ppo}, making it more practical for fairness-specific training.
+Xiao et al. \cite{rlhfbias} proved KL-divergence regularization causes ``preference collapse,'' suppressing minority viewpoints. Shapira et al. \cite{rlhfsycophancy} showed RLHF amplifies sycophancy at scale. Safety-focused approaches such as RealSafe-R1 \cite{realsafer1} and ASCL \cite{ascl} rely on human-curated reasoning trajectories, remaining annotator-dependent.
 
 \subsection{Fairness and Reasoning}
 
@@ -82,7 +82,7 @@ FairReason \cite{fairreason} is the closest work to ours, using policy gradient 
 \subsection{Problem Formulation}
 
 
-We formulate fairness as a verifiable reasoning task. Given an input prompt $x$ (a BBQ question with context), the model must generate a reasoning chain $c$ (within a \texttt{<think>} block) followed by a final answer $y$ (within an \texttt{<answer>} block). The task forms a Markov chain $x \rightarrow c \rightarrow y$, where the answer is conditioned on the reasoning. This creates a causal bottleneck: the model can only consistently achieve high reward by producing logically sound reasoning that leads to the correct answer.
+We formulate fairness as a verifiable reasoning task. Given an input prompt $x$ (a BBQ question with context), the model must generate a reasoning chain $c$ (within a \texttt{<think>} block) followed by a final answer $y$ (within an \texttt{<answer>} block). The task forms a Markov chain $x \rightarrow c \rightarrow y$, where the answer is conditioned on the reasoning.
 
 \begin{figure}
     \centering
@@ -93,7 +93,7 @@ We formulate fairness as a verifiable reasoning task. Given an input prompt $x$ 
 
 \subsection{BBQ as Fairness Verifier}
 
-BBQ serves as a deterministic fairness verifier: in ambiguous contexts the correct answer is always ``Unknown,'' and in disambiguated contexts the answer is determined by explicit evidence. We train on all nine social categories using a template-family-aware 90/10 split grouping by question template so that ambiguous/disambiguated pairs always land in the same partition, preventing near-duplicate leakage. This design prevents the model from memorizing specific question variants; the causal faithfulness test (Section~IV-G) provides further evidence that accuracy reflects active reasoning rather than format recall (accuracy drops 22 pp when reasoning content is removed).
+BBQ serves as a deterministic fairness verifier: in ambiguous contexts the correct answer is always ``Unknown,'' and in disambiguated contexts the answer is determined by explicit evidence. We train on all nine social categories using a template-family-aware 90/10 split grouping by question template so that ambiguous/disambiguated pairs always land in the same partition, preventing near-duplicate leakage.
 
 \subsection{Composite Reward Function}
 
@@ -185,6 +185,7 @@ Table~\ref{tab:main} presents results evaluated on the held-out BBQ evaluation s
 \begin{table}[htbp]
 \caption{Main Results on BBQ Benchmark}
 \begin{center}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{lccccc}
 \toprule
 \textbf{Condition} & \textbf{BBQ-A} & \textbf{BBQ-D} & \textbf{Bias}$\downarrow$ & \textbf{ASE}$\downarrow$ & \textbf{Abstain} \\
@@ -194,7 +195,8 @@ SFT                & 97.8\% & 97.3\% & 0.723 &  1.6\% & 29.0\% \\
 Struct.-only RL ($\lambda=0$) & 69.5\% & 94.6\% & 0.697 & 21.3\% & 35.2\% \\
 \textbf{Fair-RLVR (ours)} & \textbf{86.7\%} & 92.7\% & \textbf{0.634} & 8.4\% & 41.7\% \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \label{tab:main}
 \end{center}
 \end{table}
@@ -203,11 +205,11 @@ Struct.-only RL ($\lambda=0$) & 69.5\% & 94.6\% & 0.697 & 21.3\% & 35.2\% \\
 
 Three findings stand out. First, Fair-RLVR achieves the lowest stereotype error ratio (0.634) of all trained models, outperforming both the structural-only RL baseline (0.697) and SFT (0.723), while simultaneously improving ambiguous-context accuracy by +20.6 pp over zero-shot. The ASE column shows Fair-RLVR at 8.4\% versus the structural-only RL baseline at 21.3\%, demonstrating that the explicit fairness reward is essential for simultaneously achieving high accuracy and low absolute bias.
 
-Second, SFT achieves 97.8\% accuracy and, as a direct arithmetic consequence ($\text{ASE} = (1-\text{BBQ-A})\times\text{Bias}$), the lowest ASE (1.6\%). However, this low ASE reflects \emph{error suppression}, not \emph{error debiasing}: the few errors SFT does make are slightly \emph{more} stereotype-aligned than zero-shot (Bias 0.723 vs.\ 0.717), meaning SFT has memorized BBQ's label distribution without altering the stereotype-driven failure mode it falls back on when memorization misses. The Bias ratio is the metric that isolates this failure mode, and on it only Fair-RLVR moves the needle (0.717 $\to$ 0.634). The OOD results (Table~\ref{tab:ood}) confirm this interpretation: outside the memorized distribution, SFT records the worst StereoSet language model score (LMS, 0.911) and Idealized Context Association Test (ICAT, 0.536) of all trained models and trails Fair-RLVR on intersectional BBQ in both contexts. In-distribution ASE is therefore not a reliable proxy for fairness under distribution shift, whereas Fair-RLVR's gains persist there.
+Second, SFT achieves 97.8\% accuracy and, as a direct arithmetic consequence ($\text{ASE} = (1-\text{BBQ-A})\times\text{Bias}$), the lowest ASE (1.6\%). However, this low ASE reflects \emph{error suppression}, not \emph{error debiasing}: the few errors SFT does make are slightly \emph{more} stereotype-aligned than zero-shot (Bias 0.723 vs.\ 0.717), meaning SFT has memorized BBQ's label distribution without altering the stereotype-driven failure mode it falls back on when memorization misses. The Bias ratio is the metric that isolates this failure mode, and on it only Fair-RLVR moves the needle (0.717 $\to$ 0.634). The OOD results (Table~\ref{tab:ood}) confirm this interpretation: outside the memorized distribution, SFT records the worst StereoSet LMS (0.911) and ICAT (0.536) of all trained models and trails Fair-RLVR on intersectional BBQ in both contexts.
 
-Third, Fair-RLVR's elevated abstention rate (41.7\% overall; 68.9\% on ambiguous, 14.4\% on disambiguated) reflects the learned strategy of withholding judgment when the evidence is insufficient---precisely the behaviour BBQ defines as correct in ambiguous contexts. The 14.4\% disambiguated abstention represents partial over-abstention where the model withholds commitment on questions with determinable answers (SFT's corresponding rate is 0.3\%); we view this as epistemically conservative failure---declining to answer---rather than stereotype-aligned failure, and quantify the resulting accuracy cost (92.7\% vs.\ 97.3\% BBQ-D) in Section~V.
+Third, Fair-RLVR's elevated abstention rate (41.7\% overall; 68.9\% on ambiguous, 14.4\% on disambiguated) reflects the learned strategy of withholding judgment when evidence is insufficient---the behaviour BBQ defines as correct in ambiguous contexts. The 14.4\% disambiguated abstention is over-generalisation of this strategy to determinable questions (SFT: 0.3\%), representing conservative rather than stereotype-aligned errors, at a cost of 92.7\% vs.\ 97.3\% BBQ-D (Section~V).
 
-We also examined standard group-fairness metrics (Demographic Parity Difference, Disparate Impact Ratio, Equalized Odds) from the tabular-classification literature \cite{szalouk_rlhf_bias}, but omit them here: these metrics assume a binary decision with no abstention action and treat any target-group prediction as a harm. Both assumptions break on BBQ, where ``Unknown'' is a legitimate and often correct response, and where the stereotype-target answer is the ground-truth answer in roughly half of disambiguated items. As a result these metrics conflate principled abstention and correct target predictions with bias, and do not cleanly separate the conditions our reward targets. We therefore rely on the official BBQ bias score (Section~V), which handles abstention and the ambiguous/disambiguated distinction by construction.
+We also examined standard group-fairness metrics (Demographic Parity Difference, Disparate Impact Ratio, Equalized Odds) \cite{szalouk_rlhf_bias} but omit them: these metrics assume a binary decision with no abstention action, and treat any target-group prediction as a harm. Both assumptions break on BBQ, where ``Unknown'' is a legitimate response and the stereotype-target answer is correct in roughly half of disambiguated items. We therefore rely on the official BBQ bias score, which handles abstention and the ambiguous/disambiguated distinction by construction.
 
 \subsection{Per-Category Analysis}
 
@@ -353,23 +355,23 @@ Fair-RLVR          & 0.214 & 0.700 & 0.958 & 0.575 & \textbf{0.962} & 0.912 \\
 \label{tab:ood}
 \end{table}
 
-The decisive comparison here is Fair-RLVR versus SFT, the model whose in-distribution numbers (Table~\ref{tab:main}) might otherwise appear competitive. Out of distribution, \textbf{Fair-RLVR outperforms SFT on five of the six measures}: StereoSet SS (0.700 vs.\ 0.706, closer to the unbiased 0.5), LMS (0.958 vs.\ 0.911), ICAT (0.575 vs.\ 0.536), and intersectional BBQ in both ambiguous (0.962 vs.\ 0.954) and disambiguated (0.912 vs.\ 0.904) contexts, with WinoBias essentially tied (0.214 vs.\ 0.210). SFT's collapse on StereoSet LMS and ICAT---the worst of all trained models---confirms that its in-distribution gains are memorization that does not survive distribution shift, whereas Fair-RLVR's fairness behaviour transfers.
+Out of distribution, \textbf{Fair-RLVR outperforms SFT on five of six measures}: StereoSet SS (0.700 vs.\ 0.706, closer to unbiased 0.5), LMS (0.958 vs.\ 0.911), ICAT (0.575 vs.\ 0.536), and intersectional BBQ ambiguous (0.962 vs.\ 0.954) and disambiguated (0.912 vs.\ 0.904), with WinoBias essentially tied (0.214 vs.\ 0.210). SFT's collapse on LMS and ICAT---worst of all trained models---confirms its in-distribution gains are memorization that does not survive distribution shift.
 
-Against the structural-only RL control, the picture is complementary rather than contradictory: the format-only baseline edges ahead on WinoBias and StereoSet by small margins (e.g., ICAT 0.582 vs.\ 0.575), reflecting slightly better-preserved language coherence in the absence of any task-specific reward, while Fair-RLVR achieves the highest intersectional ambiguous-context accuracy (96.2\%) on category combinations entirely absent from training---the OOD setting most diagnostic of learned fairness reasoning, since it requires applying the abstain-under-ambiguity strategy to novel demographic intersections. Fair-RLVR is the only model that simultaneously achieves the lowest in-distribution stereotype error ratio (Table~\ref{tab:main}) and the strongest intersectional generalization, the combination this work targets.
+Against the structural-only RL control, the format-only baseline edges ahead on WinoBias and StereoSet (e.g., ICAT 0.582 vs.\ 0.575), reflecting slightly better language coherence without a task-specific reward. Fair-RLVR is the only model that simultaneously achieves the lowest in-distribution stereotype error ratio (Table~\ref{tab:main}) and the highest intersectional ambiguous accuracy (96.2\%) on demographic combinations absent from training---the combination this work targets.
 
 %% ============================================================
 \section{Limitations}
 %% ============================================================
 
-\noindent\textbf{OOD and benchmark scope.} OOD evaluations on WinoBias, StereoSet, and intersectional BBQ (Table~\ref{tab:ood}) confirm transfer beyond training, but these benchmarks share structural similarities with BBQ (MC format, English). Free-form generation benchmarks (e.g., CrowS-Pairs \cite{crowspairs}) and global cultural contexts (BharatBBQ) remain untested.
+\noindent\textbf{OOD and benchmark scope.} Transfer is confirmed on WinoBias, StereoSet, and intersectional BBQ, but these share structural similarities with BBQ (MC format, English). Free-form generation (CrowS-Pairs \cite{crowspairs}) and global cultural contexts (BharatBBQ) remain untested.
 
-\noindent\textbf{Model scale.} Experiments use a single model size (3B parameters). Larger models (7B+) may benefit more from verifiable reward signals but also exhibit stronger pre-training biases, and whether $\lambda=0.5$ remains optimal at scale is an open question.
+\noindent\textbf{Model scale.} Experiments use a single model size (3B parameters). Whether $\lambda=0.5$ remains optimal at larger scales is an open question.
 
-\noindent\textbf{Single seed.} All experiments use seed 42; RL training variance means small margins (e.g., structural-only RL bias 0.697 vs.\ Fair-RLVR 0.634) should be interpreted cautiously. Multiple seeds would strengthen causal claims.
+\noindent\textbf{Single seed.} All experiments use seed 42; RL training variance means small margins (e.g., structural-only RL bias 0.697 vs.\ Fair-RLVR 0.634) should be interpreted cautiously.
 
-\noindent\textbf{Over-abstention on disambiguated questions.} Fair-RLVR abstains (outputs ``Unknown'') on 14.4\% of disambiguated BBQ questions where a definitive answer is available, compared to 0.3\% for SFT. This over-abstention reduces disambiguated-context accuracy (92.7\% vs.\ SFT 97.3\%) and suggests the abstention strategy learned from ambiguous contexts partially over-generalises to determinable contexts. We note these are epistemically conservative errors (declining to commit) rather than stereotype-aligned ones; nonetheless, calibrating abstention more precisely is a clear direction for improvement.
+\noindent\textbf{Over-abstention.} Fair-RLVR abstains on 14.4\% of disambiguated questions (SFT: 0.3\%), reducing BBQ-D to 92.7\% vs.\ 97.3\%. These are conservative rather than stereotype-aligned errors, but calibrating abstention more precisely is a clear improvement direction.
 
-\noindent\textbf{Uneven per-category improvement.} Fair-RLVR increases the stereotype error \emph{ratio} in SES, Nationality, and Race/Ethnicity relative to zero-shot---an artifact of shrinking error denominators---though ASE, the absolute-harm measure, decreases across all nine categories (see Section~IV-D analysis).
+\noindent\textbf{Uneven per-category improvement.} The stereotype error ratio increases in SES, Nationality, and Race/Ethnicity---a denominator artifact of shrinking error counts---though ASE decreases across all nine categories (Section~IV-D).
 
 
 %% ============================================================
@@ -378,9 +380,9 @@ Against the structural-only RL control, the picture is complementary rather than
 
 This paper introduces Fair-RLVR, a framework that applies Reinforcement Learning from Verifiable Rewards to fairness alignment in language models. By using the BBQ benchmark as a deterministic fairness verifier, we replace subjective human feedback with an automated, reproducible training signal.
 
-Fair-RLVR ($\lambda=0.5$) improves ambiguous-context accuracy from 66.1\% to 86.7\%, reduces ASE from 24.3\% to 8.4\%, and is the only trained model to shift the composition of errors away from stereotypes (Bias 0.717 $\to$ 0.634), while SFT---despite higher in-distribution accuracy---leaves the stereotype error ratio unchanged and degrades out of distribution, trailing Fair-RLVR on five of six OOD measures. Causal faithfulness analysis ($\Delta_{\text{null}} = 0.22$) confirms the chain-of-thought plays a genuine computational role, and Fair-RLVR achieves the highest intersectional BBQ ambiguous accuracy (96.2\%) on demographic combinations never seen in training.
+Fair-RLVR ($\lambda=0.5$) is the only trained model to shift the composition of errors away from stereotypes (Bias 0.717 $\to$ 0.634) while improving ambiguous-context accuracy by +20.6 pp and reducing ASE from 24.3\% to 8.4\%. SFT leaves the stereotype error ratio unchanged and degrades out of distribution. Causal faithfulness analysis ($\Delta_{\text{null}} = 0.22$) confirms genuine CoT dependence, and Fair-RLVR achieves the highest intersectional BBQ ambiguous accuracy (96.2\%) on demographic combinations absent from training.
 
-The central insight is that structured bias benchmarks can provide the verifiable labels needed for RLVR-based fairness training---opening a path toward scalable, automated bias reduction without human annotators, and producing debiasing behaviour that, unlike supervised fine-tuning, survives distribution shift. Future work includes scaling to larger models and evaluating on culturally diverse benchmarks such as BharatBBQ.
+The central insight is that structured bias benchmarks provide the verifiable labels needed for scalable, automated fairness training---producing debiasing behaviour that, unlike SFT, survives distribution shift. Future work includes scaling to larger models and evaluating on culturally diverse benchmarks such as BharatBBQ.
 
 \section*{Acknowledgment}
 
